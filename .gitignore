@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+
+# ignore model weights
+*.pth
+*.pkl
+
+# don't add testing tinygrad
+tinygrad/
