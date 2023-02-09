@@ -138,7 +138,7 @@ elif sys.argv[1] == "gen":
         out = tokenizer.decode(tokens)
         print(tokenizer.decode(last_token), end="", flush=True)
 
-        break if we reach the "end" of text
+        # break if we reach the "end" of text
         if tokens[-1] == 0:
             break
         if out.endswith(("<|endoftext|>", "\n\n")):
