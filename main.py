@@ -203,7 +203,7 @@ elif sys.argv[1] == "gpt":
     # run model
     print(ctx_str, end="", flush=True)
     alpha_counter = np.zeros(50277)
-    for i in range(1):
+    for i in range(10):
         out = model.forward(Tensor(ctx))
         sampled = sample_logits(
             out.numpy()[-1][-1],

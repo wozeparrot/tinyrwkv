@@ -20,13 +20,11 @@ class Embedding:
 
     def __call__(self, idx: Tensor) -> Tensor:
         idxnp = idx.numpy()
-        x = Tensor.cat(
-            *[
-                self.weight[int(idxnp[0, i])].reshape((1, self.embed_size))
-                for i in range(idx.shape[1])
-            ],
-        )
-        return x.reshape((1, idx.shape[1], self.embed_size))
+        x = self.weight[int(idxnp[0, 0])].reshape((1, 1, self.embed_size))
+        for i in range(1, idx.shape[1]):
+            y = self.weight[int(idxnp[0, i])].reshape((1, 1, self.embed_size))
+            x = x.cat(y, dim=1)
+        return x
 
 
 class ChannelMix:
@@ -72,7 +70,6 @@ class ChannelMix:
 
 
 class WKV:
-    # really need to rewrite this with only tinygrad ops
     def __call__(
         self,
         B: int,
@@ -96,7 +93,7 @@ class WKV:
             sl += [(s, s - 1, (s >> 1) * 3 - 1, T - (T % s < (s >> 1)) * (s >> 1))]
             s = s >> 1
 
-        # only numpy section
+        # only section that is still numpy
         oo = k.detach().numpy()
         pp = v.detach().numpy()
         qq = np.ones((T, B, C))
@@ -106,10 +103,13 @@ class WKV:
             q = qq[sb:sz:ss]
             d = dd[sb:sz:ss]
             o = oo[sb:sz:ss]
+
             e = oo[sa:sz:ss] + d * time_first.numpy()
+
             x = np.maximum(e, o)
             a = np.exp(e - x)
             b = np.exp(o - x)
+
             p[:] = a * pp[sa:sz:ss] + b * p
             q[:] = a * qq[sa:sz:ss] + b * q
             d[:] = dd[sa:sz:ss] + d
@@ -129,33 +129,6 @@ class WKV:
         y = v[:1, :, :].cat(y[1:, :, :])
         y = y.transpose((1, 0, 2))
         return y
-
-        # time_first = -(time_first.exp())
-        # k = k.transpose((1, 0, 2))
-        # v = v.transpose((1, 0, 2))
-        #
-        # pp = k.detach()
-        # aa = v.detach()
-        # bb = Tensor.ones(T, B, C)
-        # wkv = Tensor.zeros(0, B, C)
-        # for i in range(B):
-        #     ww = time_first + k[i]
-        #     eww = ww.exp()
-        #     epp = pp.exp()
-        #
-        #     # print(wkv.shape, eww.shape, epp.shape)
-        #     wkv = wkv.cat((eww * v[i] + epp * aa[i]) / (eww * bb[i] + epp), dim=0)
-        #
-        #     ww = pp + time_decay
-        #     p = elemmax(ww, k[i])
-        #     e1 = (ww - p).exp()
-        #     e2 = (k[i] - p).exp()
-        #     if i != T - 1:
-        #         aa = e1 * aa + e2 * v[i]
-        #         bb = e1 * bb + e2
-        #         pp = p
-        #
-        # return wkv.transpose((1, 0, 2))
 
 
 class TimeMix:
@@ -302,4 +275,4 @@ class RWKV_GPT:
 
         x = self.head(x)
 
-        return x
+        return x.realize()
