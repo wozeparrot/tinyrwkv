@@ -4,7 +4,7 @@ from utils import sample_logits
 
 from tinygrad.nn.optim import get_parameters
 from tinygrad.tensor import Tensor
-from transformers import PreTrainedTokenizerFast
+from tokenizers import Tokenizer
 import numpy as np
 
 from tqdm import tqdm
@@ -85,7 +85,7 @@ elif sys.argv[1] == "gen":
     Tensor.no_grad = True
 
     # load tokenizer
-    tokenizer = PreTrainedTokenizerFast(tokenizer_file="tokenizer.json")
+    tokenizer = Tokenizer.from_file("tokenizer.json")
 
     # load model
     model = RWKV_RNN(1024, 50277, 1024, 24, "./weights.pkl")
@@ -95,10 +95,10 @@ elif sys.argv[1] == "gen":
 
     # encode initial context
     ctx_str = "The quick brown"
-    ctx = cast(np.ndarray, tokenizer.encode(ctx_str, return_tensors="np")[0])
+    ctx = tokenizer.encode(ctx_str).ids
 
     # encode separator
-    sep = tokenizer.encode("\n\n", return_tensors="np")[0]
+    sep = tokenizer.encode("\n\n").ids
 
     print("Preprocessing...")
     for i in tqdm(range(len(ctx))):
@@ -113,6 +113,7 @@ elif sys.argv[1] == "gen":
 
     tokens = []
     alpha_counter = np.zeros(50277)
+    out = ""
     while True:
         logits = model.forward(int(last_token))
         logits = logits.numpy()
@@ -135,8 +136,9 @@ elif sys.argv[1] == "gen":
         tokens.append(last_token)
         alpha_counter[last_token] += 1
 
-        out = tokenizer.decode(tokens)
-        print(tokenizer.decode(last_token), end="", flush=True)
+        last_decoded = tokenizer.decode([last_token])
+        print(last_decoded, end="", flush=True)
+        out += last_decoded
 
         # break if we reach the "end" of text
         if tokens[-1] == 0:
@@ -149,9 +151,6 @@ elif sys.argv[1] == "gra":
     # seed random
     np.random.seed(42)
 
-    # load tokenizer
-    tokenizer = PreTrainedTokenizerFast(tokenizer_file="tokenizer.json")
-
     # load model
     model = RWKV_RNN(1024, 50277, 1024, 1, "./weights.pkl")
 
@@ -160,7 +159,7 @@ elif sys.argv[1] == "gpt":
     np.random.seed(42)
 
     # load tokenizer
-    tokenizer = PreTrainedTokenizerFast(tokenizer_file="tokenizer.json")
+    tokenizer = Tokenizer.from_file("tokenizer.json")
 
     # load model
     model = RWKV_GPT(1024, 50277, 1024, 24)
@@ -198,13 +197,13 @@ elif sys.argv[1] == "gpt":
 
     # encode initial context
     ctx_str = "The quick brown"
-    ctx = tokenizer.encode(ctx_str, return_tensors="np")
+    ctx = tokenizer.encode(ctx_str).ids
 
     # run model
     print(ctx_str, end="", flush=True)
     alpha_counter = np.zeros(50277)
     for i in range(10):
-        out = model.forward(Tensor(ctx))
+        out = model.forward(Tensor([ctx]))
         sampled = sample_logits(
             out.numpy()[-1][-1],
             alpha_counter=alpha_counter,
@@ -215,6 +214,6 @@ elif sys.argv[1] == "gpt":
             top_k=35,
         )
         alpha_counter[sampled] += 1
-        txt = tokenizer.decode(sampled)
+        txt = tokenizer.decode([sampled])
         print(txt, end="", flush=True)
-        ctx = np.concatenate((ctx, [[sampled]]), axis=1)
+        ctx = np.concatenate((ctx, [sampled]), axis=0)
