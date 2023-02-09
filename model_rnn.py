@@ -3,12 +3,19 @@ import tinygrad.nn as nn
 import pickle
 from tqdm import tqdm
 
-import types
 import gc
+
+from utils import matvec, elemmax
 
 
 class LayerState:
-    def __init__(self, embed_size):
+    ffn_xx: Tensor
+    att_xx: Tensor
+    att_aa: Tensor
+    att_bb: Tensor
+    att_pp: Tensor
+
+    def __init__(self, embed_size: int):
         self.ffn_xx = Tensor([0.0] * embed_size)
         self.att_xx = Tensor([0.0] * embed_size)
         self.att_aa = Tensor([0.0] * embed_size)
@@ -17,25 +24,37 @@ class LayerState:
 
 
 class State:
-    def __init__(self, embed_size, layers):
+    state: list[LayerState]
+
+    def __init__(self, embed_size: int, layers: int):
         self.states = [LayerState(embed_size) for _ in range(layers)]
 
-    def __getitem__(self, i):
+    def __getitem__(self, i: int) -> LayerState:
         return self.states[i]
 
 
 class Att:
+    time_mix_k: Tensor
+    time_mix_v: Tensor
+    time_mix_r: Tensor
+    key: Tensor
+    value: Tensor
+    receptance: Tensor
+    time_first: Tensor
+    time_decay: Tensor
+    output: Tensor
+
     def __init__(
         self,
-        time_mix_k,
-        time_mix_v,
-        time_mix_r,
-        key,
-        value,
-        receptance,
-        time_first,
-        time_decay,
-        output,
+        time_mix_k: Tensor,
+        time_mix_v: Tensor,
+        time_mix_r: Tensor,
+        key: Tensor,
+        value: Tensor,
+        receptance: Tensor,
+        time_first: Tensor,
+        time_decay: Tensor,
+        output: Tensor,
     ):
         self.time_mix_k = time_mix_k
         self.time_mix_v = time_mix_v
@@ -47,48 +66,49 @@ class Att:
         self.time_decay = time_decay
         self.output = output
 
-    def __call__(self, x, state):
-        xx = state.att_xx
-        xk = self.time_mix_k * (x - xx) + xx
-        xv = self.time_mix_v * (x - xx) + xx
-        xr = self.time_mix_r * (x - xx) + xx
+    def __call__(self, x: Tensor, state: LayerState) -> Tensor:
+        xk = self.time_mix_k * (x - state.att_xx) + state.att_xx
+        xv = self.time_mix_v * (x - state.att_xx) + state.att_xx
+        xr = self.time_mix_r * (x - state.att_xx) + state.att_xx
 
         k = matvec(self.key, xk)
         v = matvec(self.value, xv)
         r = matvec(self.receptance, xr).sigmoid()
 
-        aa = state.att_aa
-        bb = state.att_bb
-        pp = state.att_pp
-
         # calculate output
         ww = k + self.time_first
         eww = ww.exp()
-        epp = pp.exp()
-        rwkv = r * ((eww * v + epp * aa) / (eww + epp * bb))
+        epp = state.att_pp.exp()
+        rwkv = r * ((eww * v + epp * state.att_aa) / (eww + epp * state.att_bb))
 
         # update state
-        ww = pp + self.time_decay
-        p = ww.elemmax(k)
+        ww = state.att_pp + self.time_decay
+        p = elemmax(ww, k)
         e1 = (ww - p).exp()
         e2 = (k - p).exp()
 
         state.att_xx = x.realize()
-        state.att_aa = ((e1 * aa) + (e2 * v)).realize()
-        state.att_bb = ((e1 * bb) + e2).realize()
+        state.att_aa = ((e1 * state.att_aa) + (e2 * v)).realize()
+        state.att_bb = ((e1 * state.att_bb) + e2).realize()
         state.att_pp = p.realize()
 
         return matvec(self.output, rwkv)
 
 
 class Ffn:
+    time_mix_k: Tensor
+    time_mix_r: Tensor
+    key: Tensor
+    value: Tensor
+    receptance: Tensor
+
     def __init__(
         self,
-        time_mix_k,
-        time_mix_r,
-        key,
-        value,
-        receptance,
+        time_mix_k: Tensor,
+        time_mix_r: Tensor,
+        key: Tensor,
+        value: Tensor,
+        receptance: Tensor,
     ):
         self.time_mix_k = time_mix_k
         self.time_mix_r = time_mix_r
@@ -96,10 +116,9 @@ class Ffn:
         self.value = value
         self.receptance = receptance
 
-    def __call__(self, x, state):
-        xx = state.ffn_xx
-        xk = self.time_mix_k * (x - xx) + xx
-        xr = self.time_mix_r * (x - xx) + xx
+    def __call__(self, x: Tensor, state: LayerState) -> Tensor:
+        xk = self.time_mix_k * (x - state.ffn_xx) + state.ffn_xx
+        xr = self.time_mix_r * (x - state.ffn_xx) + state.ffn_xx
         state.ffn_xx = x.realize()
 
         k = matvec(self.key, xk).relu().square()
@@ -111,27 +130,32 @@ class Ffn:
 
 
 class Block:
+    att_ln: nn.LayerNorm
+    att: Att
+    ffn_ln: nn.LayerNorm
+    ffn: Ffn
+
     def __init__(
         self,
-        embed_size,
-        att_ln_weight,
-        att_ln_bias,
-        att_time_mix_k,
-        att_time_mix_v,
-        att_time_mix_r,
-        att_key,
-        att_value,
-        att_receptance,
-        att_time_first,
-        att_time_decay,
-        att_output,
-        ffn_ln_weight,
-        ffn_ln_bias,
-        ffn_time_mix_k,
-        ffn_time_mix_r,
-        ffn_key,
-        ffn_value,
-        ffn_receptance,
+        embed_size: int,
+        att_ln_weight: Tensor,
+        att_ln_bias: Tensor,
+        att_time_mix_k: Tensor,
+        att_time_mix_v: Tensor,
+        att_time_mix_r: Tensor,
+        att_key: Tensor,
+        att_value: Tensor,
+        att_receptance: Tensor,
+        att_time_first: Tensor,
+        att_time_decay: Tensor,
+        att_output: Tensor,
+        ffn_ln_weight: Tensor,
+        ffn_ln_bias: Tensor,
+        ffn_time_mix_k: Tensor,
+        ffn_time_mix_r: Tensor,
+        ffn_key: Tensor,
+        ffn_value: Tensor,
+        ffn_receptance: Tensor,
     ):
         self.att_ln = nn.LayerNorm(embed_size)
         self.att_ln.weight.assign(att_ln_weight)
@@ -159,7 +183,7 @@ class Block:
             ffn_receptance,
         )
 
-    def __call__(self, x, state):
+    def __call__(self, x: Tensor, state: LayerState) -> Tensor:
         ln1 = self.att_ln(x)
         x += self.att(ln1, state)
         ln2 = self.ffn_ln(x)
@@ -168,11 +192,24 @@ class Block:
 
 
 class RWKV_RNN:
-    def __init__(self, ctx_size, vocab_size, embed_size, layers, path):
+    ctx_size: int
+    vocab_size: int
+    embed_size: int
+
+    emb: Tensor
+    blocks: list[Block]
+    ln_out_weight: Tensor
+    ln_out_bias: Tensor
+    head: Tensor
+
+    state: State
+
+    def __init__(
+        self, ctx_size: int, vocab_size: int, embed_size: int, layers: int, path: str
+    ):
         self.ctx_size = ctx_size
         self.vocab_size = vocab_size
         self.embed_size = embed_size
-        self.layers = []
 
         weights = pickle.load(open(path, "rb"))
         tg_weights = {}
@@ -223,14 +260,11 @@ class RWKV_RNN:
             x = self.emb[int(ctx.numpy()[-1])]
 
         for i, block in enumerate(self.blocks):
-            x = block(x, self.state[i]).realize()
+            x = block(x, self.state[i])
 
         if not preprocess:
             x = x.layernorm().linear(self.ln_out_weight, self.ln_out_bias)
             x = matvec(self.head, x)
 
             return x.realize()
-
-
-def matvec(mat: Tensor, vec: Tensor) -> Tensor:
-    return (mat * vec).sum(axis=1)
+        return None

@@ -1,7 +1,7 @@
 from model_gpt import RWKV_GPT
 from model_rnn import RWKV_RNN
+from utils import sample_logits
 
-from scipy.special import softmax
 from tinygrad.nn.optim import get_parameters
 from tinygrad.tensor import Tensor
 from transformers import PreTrainedTokenizerFast
@@ -12,46 +12,9 @@ from typing import cast
 import gc
 import pickle
 import sys
-import types
 
 
 np.set_printoptions(precision=4, suppress=True, linewidth=200)
-
-
-def sample_logits(
-    logits,
-    *,
-    alpha_counter=None,
-    alpha_presence=0.0,
-    alpha_frequency=0.0,
-    temperature=0.8,
-    top_p=0.9,
-    top_k=35,
-):
-    # alpha sampling
-    if alpha_counter is not None and alpha_presence > 0.0 and alpha_frequency > 0.0:
-        for i in range(logits.shape[0]):
-            logits[i] -= (alpha_counter[i] * alpha_frequency) + (
-                float(alpha_counter[i] > 0) * alpha_presence
-            )
-
-    # top-k sampling
-    if top_k > 0:
-        top_k = min(top_k, logits.shape[-1])
-        indices_to_remove = logits < np.partition(logits, -top_k)[-top_k]
-        logits[indices_to_remove] = float("-Inf")
-
-    # top-p sampling
-    probs = softmax(logits, axis=-1)
-    sorted_probs = np.sort(probs)[::-1]
-    cumulative_probs = np.cumsum(sorted_probs)
-    cutoff = float(sorted_probs[np.argmax(cumulative_probs > top_p)])
-    probs[probs < cutoff] = 0
-    if temperature != 1.0:
-        probs = pow(probs, 1.0 / temperature)
-    probs = probs / np.sum(probs, axis=0)
-    out = np.random.choice(a=len(probs), p=probs)
-    return out
 
 
 def get_child(parent, key):
@@ -89,9 +52,7 @@ if sys.argv[1] == "pre":
     # load weights
     import torch
 
-    weights = torch.load(
-        "./RWKV-4-Pile-1B5-Instruct-test1-20230124.pth", map_location="cpu"
-    )
+    weights = torch.load("./RWKV-4-Pile-430M-20220808-8066.pth", map_location="cpu")
 
     # refine weights
     for k, v in tqdm(weights.items()):
@@ -104,17 +65,21 @@ if sys.argv[1] == "pre":
         weights[k] = v
 
     # precompute ln0 with emb.weight
-    from model_run import layernorm
-
-    ln0 = types.SimpleNamespace()
-    setattr(ln0, "weight", Tensor(weights["blocks.0.ln0.weight"]))
-    setattr(ln0, "bias", Tensor(weights["blocks.0.ln0.bias"]))
-    weights["emb.weight"] = layernorm(Tensor(weights["emb.weight"]), ln0).numpy()
+    print("Precomputing emb.weight with ln0...")
+    weights["emb.weight"] = (
+        Tensor(weights["emb.weight"])
+        .layernorm()
+        .linear(
+            Tensor(weights["blocks.0.ln0.weight"]), Tensor(weights["blocks.0.ln0.bias"])
+        )
+        .numpy()
+    )
 
     # write weights
     import pickle
 
-    pickle.dump(weights, open("weights_1b5.pkl", "wb"))
+    print("Writing weights...")
+    pickle.dump(weights, open("weights.pkl", "wb"))
 
 elif sys.argv[1] == "gen":
     Tensor.no_grad = True
@@ -173,7 +138,7 @@ elif sys.argv[1] == "gen":
         out = tokenizer.decode(tokens)
         print(tokenizer.decode(last_token), end="", flush=True)
 
-        # break if we reach the "end" of text
+        break if we reach the "end" of text
         if tokens[-1] == 0:
             break
         if out.endswith(("<|endoftext|>", "\n\n")):
@@ -229,7 +194,7 @@ elif sys.argv[1] == "gpt":
     gc.collect()
 
     # make fast
-    model.forward(Tensor(np.array([[187, 187]])))
+    model.forward(Tensor(np.array([[187, 510]])))
 
     # encode initial context
     ctx_str = "The quick brown"
@@ -238,7 +203,7 @@ elif sys.argv[1] == "gpt":
     # run model
     print(ctx_str, end="", flush=True)
     alpha_counter = np.zeros(50277)
-    for i in range(100):
+    for i in range(1):
         out = model.forward(Tensor(ctx))
         sampled = sample_logits(
             out.numpy()[-1][-1],

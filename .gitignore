@@ -1,5 +1,7 @@
 .venv/
 __pycache__/
+build/
+*.so
 
 # ignore model weights
 *.pth
