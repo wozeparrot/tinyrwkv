@@ -7,5 +7,8 @@ build/
 *.pth
 *.pkl
 
+# ignore training data
+*.npy
+
 # don't add testing tinygrad
 tinygrad/

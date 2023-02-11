@@ -19,12 +19,12 @@ class Embedding:
         self.weight = Tensor.uniform(vocab_size, embed_size)
 
     def __call__(self, idx: Tensor) -> Tensor:
-        idxnp = idx.numpy()
-        x = self.weight[int(idxnp[0, 0])].reshape((1, 1, self.embed_size))
-        for i in range(1, idx.shape[1]):
-            y = self.weight[int(idxnp[0, i])].reshape((1, 1, self.embed_size))
-            x = x.cat(y, dim=1)
-        return x
+        idxnp = idx.numpy().astype(np.int32)
+        onehot = np.zeros(
+            (idx.shape[0], idx.shape[1], self.vocab_size), dtype=np.float32
+        )
+        onehot[np.arange(idx.shape[0]), np.arange(idx.shape[1]), idxnp] = 1
+        return Tensor(onehot) @ self.weight
 
 
 class ChannelMix:
@@ -77,12 +77,12 @@ class WKV:
         C: int,
         time_first: Tensor,
         time_decay: Tensor,
-        k: Tensor,
-        v: Tensor,
+        key: Tensor,
+        value: Tensor,
     ) -> Tensor:
         time_first = -(time_first.exp())
-        k = k.transpose((1, 0, 2))
-        v = v.transpose((1, 0, 2))
+        key = key.transpose((1, 0, 2))
+        value = value.transpose((1, 0, 2))
         sl = []
         s = 2
         while s <= T:
@@ -94,8 +94,8 @@ class WKV:
             s = s >> 1
 
         # only section that is still numpy
-        oo = k.detach().numpy()
-        pp = v.detach().numpy()
+        oo = key.detach().numpy()
+        pp = value.detach().numpy()
         qq = np.ones((T, B, C))
         dd = np.ones((T, 1, 1))
         for ss, sa, sb, sz in sl:
@@ -115,18 +115,18 @@ class WKV:
             d[:] = dd[sa:sz:ss] + d
             o[:] = x
 
-        pt = Tensor(pp)
+        pt = Tensor(pp, requires_grad=False)
         p = pt[-1:, :, :].cat(pt[:-1, :, :], dim=0)
-        pq = Tensor(qq)
+        pq = Tensor(qq, requires_grad=False)
         q = pq[-1:, :, :].cat(pq[:-1, :, :], dim=0)
-        po = Tensor(oo)
+        po = Tensor(oo, requires_grad=False)
         o = po[-1:, :, :].cat(po[:-1, :, :], dim=0)
 
-        x = elemmax(o, k + time_decay)
+        x = elemmax(o, key + time_decay)
         a = (o - x).exp()
-        b = (k + time_decay - x).exp()
-        y = (a * p + b * v) / (a * q + b)
-        y = v[:1, :, :].cat(y[1:, :, :])
+        b = (key + time_decay - x).exp()
+        y = (a * p + b * value) / (a * q + b)
+        y = value[:1, :, :].cat(y[1:, :, :])
         y = y.transpose((1, 0, 2))
         return y
 
@@ -161,7 +161,7 @@ class TimeMix:
             decay_speed[h] = -5 + 8 * (h / (embed_size - 1)) ** (
                 0.7 + 1.3 * ratio_0_to_1
             )
-        self.time_decay = Tensor(decay_speed)
+        self.time_decay = Tensor(decay_speed, requires_grad=False)
 
         zigzag = np.array([((i + 1) % 3 - 1) * 0.5 for i in range(embed_size)])
         self.time_first = Tensor(np.array([math.log(0.3)] * embed_size) + zigzag)
@@ -232,10 +232,10 @@ class Block:
             x = cast(nn.LayerNorm, self.ln0)(x)
 
         ln1x = self.ln1(x)
-        x += self.att(ln1x)
+        x = x + self.att(ln1x)
 
         ln2x = self.ln2(x)
-        x += self.ffn(ln2x)
+        x = x + self.ffn(ln2x)
 
         return x
 

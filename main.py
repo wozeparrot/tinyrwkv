@@ -41,11 +41,12 @@ def count_parameters(model):
 
 
 if len(sys.argv) < 2:
-    print("Usage: python main.py [pre|gen|gra|gpt]")
+    print("Usage: python main.py [pre|gen|gra|gpt|tra]")
     print("  pre: preprocess weights")
     print("  gen: generate text with the rnn mode")
     print("  gra: use with GRAPH=1 to generate a graph of the rnn mode")
     print("  gpt: generate text with the gpt mode")
+    print("  tra: train with gpt mode")
     sys.exit(1)
 
 if sys.argv[1] == "pre":
@@ -217,3 +218,87 @@ elif sys.argv[1] == "gpt":
         txt = tokenizer.decode([sampled])
         print(txt, end="", flush=True)
         ctx = np.concatenate((ctx, [sampled]), axis=0)
+elif sys.argv[1] == "tra":
+    # load tokenizer
+    tokenizer = Tokenizer.from_file("tokenizer.json")
+
+    # load model
+    model = RWKV_GPT(128, 50277, 768, 12)
+    print(f"model has ~{count_parameters(model) / 1000 / 1000}M parameters")
+
+    # load weights
+    import torch
+
+    weights = torch.load("./RWKV-4-Pile-169M-20220807-8023.pth", map_location="cpu")
+    # convert to tinygrad
+    tg_weights = {}
+    for k, v in tqdm(weights.items()):
+        tg_weights[k] = v.float().numpy()
+    del weights
+
+    loaded = 0
+    skipped = 0
+    for k, v in tqdm(tg_weights.items()):
+        try:
+            w = get_child(model, k)
+            loaded += 1
+        except:
+            w = None
+            skipped += 1
+        if w is not None:
+            assert w.shape == v.shape
+            w.assign(v.astype(np.float32))
+
+    print(f"loaded {loaded} weights, skipped {skipped} weights")
+    gc.collect()
+
+    from tinygrad.nn.optim import Adam
+
+    print("starting optimizer...")
+    params = get_parameters(model)
+    optimizer = Adam(params, lr=1e-5, b1=0.9, b2=0.999)
+    print("done starting optimizer")
+    gc.collect()
+
+    print("loading training data...")
+    train_data = np.load("train.npy").astype(int)
+    print("done loading training data")
+    gc.collect()
+
+    Tensor.training = True
+    for epoch in range(10):
+        for i in tqdm(range(0, len(train_data) - 129)):
+            x = train_data[i : i + 128]
+            y = train_data[i + 1 : i + 1 + 128]
+
+            out = model.forward(Tensor([x]))
+            sampled = sample_logits(
+                out.numpy()[-1][-1],
+                temperature=0.8,
+                top_p=0.9,
+                top_k=35,
+            )
+            txt = tokenizer.decode([sampled])
+            print(tokenizer.decode(x) + "`" + txt + "`")
+
+            optimizer.zero_grad()
+
+            # calculate cross entropy loss with numpy
+            out = out.clip(1e-8, 1 - 1e-8)[-1]
+            outnp = out.numpy()
+            loss = out[0][int(y[0])]
+            for j in range(1, y.shape[0]):
+                outy = out[j][int(y[j])]
+                loss = loss.cat(outy, dim=0)
+            loss = -loss.log()
+            loss = loss.mean()
+            gc.collect()
+
+            loss.backward()
+            gc.collect()
+
+            optimizer.step()
+            gc.collect()
+
+            loss = loss.numpy()
+            print(f"epoch {epoch}, step {i}, loss {loss}")
