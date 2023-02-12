@@ -32,6 +32,9 @@ class State:
     def __getitem__(self, i: int) -> LayerState:
         return self.states[i]
 
+    def __setitem__(self, i: int, v: LayerState) -> None:
+        self.states[i] = v
+
 
 class Att:
     time_mix_k: Tensor
@@ -66,7 +69,9 @@ class Att:
         self.time_decay = time_decay
         self.output = output
 
-    def __call__(self, x: Tensor, state: LayerState) -> Tensor:
+    def __call__(
+        self, x: Tensor, state: LayerState
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
         xk = self.time_mix_k * (x - state.att_xx) + state.att_xx
         xv = self.time_mix_v * (x - state.att_xx) + state.att_xx
         xr = self.time_mix_r * (x - state.att_xx) + state.att_xx
@@ -87,12 +92,13 @@ class Att:
         e1 = (ww - p).exp()
         e2 = (k - p).exp()
 
-        state.att_xx = x.realize()
-        state.att_aa = ((e1 * state.att_aa) + (e2 * v)).realize()
-        state.att_bb = ((e1 * state.att_bb) + e2).realize()
-        state.att_pp = p.realize()
-
-        return matvec(self.output, rwkv)
+        return (
+            matvec(self.output, rwkv),
+            x.realize(),
+            ((e1 * state.att_aa) + (e2 * v)).realize(),
+            ((e1 * state.att_bb) + e2).realize(),
+            p.realize(),
+        )
 
 
 class Ffn:
@@ -116,20 +122,21 @@ class Ffn:
         self.value = value
         self.receptance = receptance
 
-    def __call__(self, x: Tensor, state: LayerState) -> Tensor:
+    def __call__(self, x: Tensor, state: LayerState) -> tuple[Tensor, Tensor]:
         xk = self.time_mix_k * (x - state.ffn_xx) + state.ffn_xx
         xr = self.time_mix_r * (x - state.ffn_xx) + state.ffn_xx
-        state.ffn_xx = x.realize()
 
         k = matvec(self.key, xk).relu().square()
         kv = matvec(self.value, k)
         r = matvec(self.receptance, xr).sigmoid()
         rkv = r * kv
 
-        return rkv
+        return rkv, x
 
 
 class Block:
+    embed_size: int
+
     att_ln: nn.LayerNorm
     att: Att
     ffn_ln: nn.LayerNorm
@@ -157,6 +164,8 @@ class Block:
         ffn_value: Tensor,
         ffn_receptance: Tensor,
     ):
+        self.embed_size = embed_size
+
         self.att_ln = nn.LayerNorm(embed_size)
         self.att_ln.weight.assign(att_ln_weight)
         self.att_ln.bias.assign(att_ln_bias)
@@ -183,18 +192,30 @@ class Block:
             ffn_receptance,
         )
 
-    def __call__(self, x: Tensor, state: LayerState) -> Tensor:
+    def __call__(self, x: Tensor, state: LayerState) -> tuple[Tensor, LayerState]:
+        new_state = LayerState(self.embed_size)
+
         ln1 = self.att_ln(x)
-        x += self.att(ln1, state)
+        (
+            att,
+            new_state.att_xx,
+            new_state.att_aa,
+            new_state.att_bb,
+            new_state.att_pp,
+        ) = self.att(ln1, state)
+        x = x + att
         ln2 = self.ffn_ln(x)
-        x += self.ffn(ln2, state)
-        return x
+        ffn, new_state.ffn_xx = self.ffn(ln2, state)
+        x = x + ffn
+
+        return x, new_state
 
 
 class RWKV_RNN:
     ctx_size: int
     vocab_size: int
     embed_size: int
+    layers: int
 
     emb: Tensor
     blocks: list[Block]
@@ -202,14 +223,13 @@ class RWKV_RNN:
     ln_out_bias: Tensor
     head: Tensor
 
-    state: State
-
     def __init__(
         self, ctx_size: int, vocab_size: int, embed_size: int, layers: int, path: str
     ):
         self.ctx_size = ctx_size
         self.vocab_size = vocab_size
         self.embed_size = embed_size
+        self.layers = layers
 
         weights = pickle.load(open(path, "rb"))
         tg_weights = {}
@@ -251,20 +271,23 @@ class RWKV_RNN:
 
         gc.collect()
 
-        self.state = State(embed_size, layers)
+    def forward(
+        self, ctx: Tensor | int, state: State | None, preprocess: bool = False
+    ) -> tuple[Tensor, State] | State:
+        if state is None:
+            state = State(self.embed_size, self.layers)
 
-    def forward(self, ctx: Tensor | int, preprocess: bool = False) -> Tensor | None:
         if isinstance(ctx, int):
             x = self.emb[ctx]
         else:
             x = self.emb[int(ctx.numpy()[-1])]
 
         for i, block in enumerate(self.blocks):
-            x = block(x, self.state[i])
+            x, state[i] = block(x, state[i])
 
         if not preprocess:
             x = x.layernorm().linear(self.ln_out_weight, self.ln_out_bias)
             x = matvec(self.head, x)
 
-            return x.realize()
-        return None
+            return x, state
+        return state

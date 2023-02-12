@@ -12,6 +12,9 @@ def sample_logits(
     top_p: float = 0.9,
     top_k: int = 35,
 ) -> int:
+    if temperature == 0.0:
+        return int(np.argmax(logits))
+
     # alpha sampling
     if alpha_counter is not None and alpha_presence > 0.0 and alpha_frequency > 0.0:
         for i in range(logits.shape[0]):

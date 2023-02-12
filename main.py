@@ -1,5 +1,5 @@
 from model_gpt import RWKV_GPT
-from model_rnn import RWKV_RNN
+from model_rnn import RWKV_RNN, State
 from utils import sample_logits
 
 from tinygrad.nn.optim import get_parameters
@@ -92,7 +92,7 @@ elif sys.argv[1] == "gen":
     model = RWKV_RNN(1024, 50277, 1024, 24, "./weights.pkl")
 
     # run model once to move weights to correct device
-    model.forward(187)
+    model.forward(187, None)
 
     # encode initial context
     ctx_str = "The quick brown"
@@ -102,9 +102,10 @@ elif sys.argv[1] == "gen":
     sep = tokenizer.encode("\n\n").ids
 
     print("Preprocessing...")
+    state = None
     for i in tqdm(range(len(ctx))):
         x = np.concatenate([sep, ctx[:i]])
-        model.forward(int(x[-1]), True)
+        state = model.forward(int(x[-1]), state, True)
     last_token = np.concatenate([sep, ctx])[-1]
 
     print()
@@ -116,7 +117,7 @@ elif sys.argv[1] == "gen":
     alpha_counter = np.zeros(50277)
     out = ""
     while True:
-        logits = model.forward(int(last_token))
+        logits, state = model.forward(int(last_token), state)
         logits = logits.numpy()
 
         # disable <|endoftext|> token
