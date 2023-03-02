@@ -1,3 +1,4 @@
+from tinygrad.ops import GlobalCounters
 from model_gpt import RWKV_GPT
 from model_rnn import RWKV_RNN, State
 from utils import sample_logits
@@ -8,7 +9,6 @@ from tokenizers import Tokenizer
 import numpy as np
 
 from tqdm import tqdm
-from typing import cast
 import gc
 import pickle
 import sys
@@ -119,6 +119,7 @@ elif sys.argv[1] == "gen":
     while True:
         logits, state = model.forward(int(last_token), state)
         logits = logits.numpy()
+        logits.flags.writeable = True
 
         # disable <|endoftext|> token
         logits[0] = float("-Inf")
@@ -156,7 +157,104 @@ elif sys.argv[1] == "gra":
     # load model
     model = RWKV_RNN(1024, 50277, 1024, 1, "./weights.pkl")
 
-    print(model.forward(187))
+    print(model.forward(187, None))
+elif sys.argv[1] == "cmp":
+    Tensor.no_grad = True
+
+    # seed random
+    np.random.seed(42)
+
+    # load model
+    model = RWKV_RNN(1024, 50277, 768, 12, "./weights-169m.pkl")
+
+    from tinygrad.jit import TinyJit
+
+    state = State(768, 12)
+
+    @TinyJit
+    def run(x):
+        global state
+        ret, state = model.forward(x, state)
+        return ret.realize()
+
+    the_input = Tensor(model.index_embed(187).numpy())
+    out = run(the_input)
+    out = run(the_input)
+
+    special_names = {
+        id(the_input.lazydata.realized.raw()): "input",
+        id(out.lazydata.realized.raw()): "outputs",
+    }
+
+    from utils import compile_net
+
+    with open("out.c", "w") as f:
+        functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
+
+        cprog = [
+            "#include <stdio.h>",
+            "#include <string.h>",
+            "#include <math.h>",
+            "#define max(x,y) fmax(x,y)",
+        ]
+        f.write("\n".join(cprog) + "\n")
+
+        cprog = [
+            f"float {x[0]}[{x[1]}];" for x in bufs.values() if x[0] not in bufs_to_save
+        ]
+        f.write("\n".join(cprog) + "\n")
+
+        # write embedding weights, split onto multiple lines
+        f.write(f'unsigned char emb_data[] = "')
+        for i, x in enumerate(tqdm(bytes(model.emb.lazydata.realized.raw()._buf))):
+            if i % 32 == 0 and i > 0:
+                f.write('"\n"')
+            f.write(f"\\x%02X" % x)
+        f.write('";\n')
+        f.write(f"float *emb = (float *)emb_data;\n")
+
+        for name, cl in tqdm(bufs_to_save.items()):
+            f.write(f'unsigned char {name}_data[] = "')
+            for i, x in enumerate(bytes(cl._buf)):
+                if i % 32 == 0 and i > 0:
+                    f.write('"\n"')
+                f.write(f"\\x%02X" % x)
+            f.write('";\n')
+
+            f.write(f"float *{name} = (float *){name}_data;\n")
+
+        cprog = list(functions.values())
+        f.write("\n".join(cprog) + "\n")
+
+        cprog = ["void net() {"] + statements + ["}"]
+        f.write("\n".join(cprog) + "\n")
+
+        cprog = [
+            """
+int main(int argc, char *argv[]) {
+  int idx = 510;
+  for (int i = 0; i < 100; i++) {
+    memcpy(input, &emb[idx], sizeof(float) * 768);
+
+    net();
+
+    float best = -INFINITY;
+    int best_idx = -1;
+    for (int j = 0; j < 50277; j++) {
+      if (outputs[j] > best) {
+        best = outputs[j];
+        best_idx = j;
+      }
+    }
+    printf("Best: %d (%f)\\n", best_idx, best);
+
+    idx = best_idx;
+  }
+}
+"""
+        ]
+        f.write("\n".join(cprog) + "\n")
+
 elif sys.argv[1] == "gpt":
     np.random.seed(42)
 
@@ -220,6 +318,8 @@ elif sys.argv[1] == "gpt":
         print(txt, end="", flush=True)
         ctx = np.concatenate((ctx, [sampled]), axis=0)
 elif sys.argv[1] == "tra":
+    np.random.seed(42)
+
     # load tokenizer
     tokenizer = Tokenizer.from_file("tokenizer.json")
 
@@ -275,16 +375,13 @@ elif sys.argv[1] == "tra":
             out = model.forward(Tensor([x]))
             sampled = sample_logits(
                 out.numpy()[-1][-1],
-                temperature=0.8,
-                top_p=0.9,
-                top_k=35,
+                temperature=0.0,
             )
             txt = tokenizer.decode([sampled])
-            print(tokenizer.decode(x) + "`" + txt + "`")
+            print(tokenizer.decode(x) + f"({txt}|{tokenizer.decode([y[-1]])})")
 
             optimizer.zero_grad()
 
-            # calculate cross entropy loss with numpy
             out = out.clip(1e-8, 1 - 1e-8)[-1]
             outnp = out.numpy()
             loss = out[0][int(y[0])]
@@ -293,13 +390,10 @@ elif sys.argv[1] == "tra":
                 loss = loss.cat(outy, dim=0)
             loss = -loss.log()
             loss = loss.mean()
-            gc.collect()
 
             loss.backward()
-            gc.collect()
 
             optimizer.step()
-            gc.collect()
 
             loss = loss.numpy()
             print(f"epoch {epoch}, step {i}, loss {loss}")

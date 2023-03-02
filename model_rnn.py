@@ -271,6 +271,9 @@ class RWKV_RNN:
 
         gc.collect()
 
+    def index_embed(self, ctx: int) -> Tensor:
+        return self.emb[ctx]
+
     def forward(
         self, ctx: Tensor | int, state: State | None, preprocess: bool = False
     ) -> tuple[Tensor, State] | State:
@@ -278,9 +281,9 @@ class RWKV_RNN:
             state = State(self.embed_size, self.layers)
 
         if isinstance(ctx, int):
-            x = self.emb[ctx]
+            x = self.index_embed(ctx)
         else:
-            x = self.emb[int(ctx.numpy()[-1])]
+            x = ctx
 
         for i, block in enumerate(self.blocks):
             x, state[i] = block(x, state[i])

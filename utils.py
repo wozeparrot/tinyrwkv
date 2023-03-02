@@ -49,3 +49,37 @@ def elemmax(x: Tensor, y: Tensor) -> Tensor:
     xgty = x.sub(y).relu() - (x.sub(y) - 1).relu()
     ygtx = y.sub(x).relu() - (y.sub(x) - 1).relu()
     return xgty * x + ygtx * y
+
+
+def compile_net(run, special_names):
+    # functions that run the net
+    functions = {}
+    bufs = {}
+    bufnum = 0
+    statements = []
+    bufs_to_save = {}
+    for fxn, args in run.jit_cache:
+        functions[
+            fxn.name
+        ] = fxn.prg  # NOTE: this assumes all with the same name are the same
+        cargs = []
+        for i, arg in enumerate(args):
+            if i in fxn.bufs_to_delete:
+                continue
+            key = id(arg.raw())
+            if key not in bufs:
+                if key in special_names:
+                    bufs[key] = (special_names[key], len(arg.raw()._buf))
+                else:
+                    bufs[key] = (f"buf_{bufnum}", len(arg.raw()._buf))
+                    bufnum += 1
+                    if i > 0:
+                        bufs_to_save[
+                            bufs[key][0]
+                        ] = (
+                            arg.raw()
+                        )  # if first usage of a buffer is not an output, and it's not a special name
+            cargs.append(bufs[key][0])
+        statements.append(f"{fxn.name}({', '.join(cargs)});")
+
+    return functions, statements, bufs, bufs_to_save
