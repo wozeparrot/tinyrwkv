@@ -106,6 +106,7 @@ elif sys.argv[1] == "gen":
     for i in tqdm(range(len(ctx))):
         x = np.concatenate([sep, ctx[:i]])
         state = model.forward(int(x[-1]), state, True)
+        state.realize()
     last_token = np.concatenate([sep, ctx])[-1]
 
     print()
@@ -118,6 +119,7 @@ elif sys.argv[1] == "gen":
     out = ""
     while True:
         logits, state = model.forward(int(last_token), state)
+        state.realize()
         logits = logits.numpy()
         logits.flags.writeable = True
 
@@ -169,21 +171,23 @@ elif sys.argv[1] == "cmp":
 
     from tinygrad.jit import TinyJit
 
-    state = State(768, 12)
-
     @TinyJit
     def run(x):
-        global state
-        ret, state = model.forward(x, state)
+        ret = model.forward(x, jit=True)
         return ret.realize()
 
-    the_input = Tensor(model.index_embed(187).numpy())
+    embed = Tensor(model.index_embed(510).numpy())
+    init_state = model.init_state()
+    the_input = model.build_jit_input(embed, init_state)
     out = run(the_input)
     out = run(the_input)
+
+    for (j, i), idx in run.input_replace.items():
+        run.jit_cache[j][1][i] = the_input.lazydata.realized.raw()
 
     special_names = {
         id(the_input.lazydata.realized.raw()): "input",
-        id(out.lazydata.realized.raw()): "outputs",
+        id(out.lazydata.realized.raw()): "output",
     }
 
     from utils import compile_net
@@ -195,16 +199,20 @@ elif sys.argv[1] == "cmp":
             "#include <stdio.h>",
             "#include <string.h>",
             "#include <math.h>",
-            "#define max(x,y) fmax(x,y)",
+            "#define max(x,y) ((x>y)?x:y)",
         ]
         f.write("\n".join(cprog) + "\n")
 
-        cprog = [
-            f"float {x[0]}[{x[1]}];" for x in bufs.values() if x[0] not in bufs_to_save
-        ]
-        f.write("\n".join(cprog) + "\n")
+        # write init state
+        f.write(f'unsigned char state_data[] = "')
+        for i, x in enumerate(tqdm(bytes(init_state.lazydata.realized.raw()._buf))):
+            if i % 32 == 0 and i > 0:
+                f.write('"\n"')
+            f.write(f"\\x%02X" % x)
+        f.write('";\n')
+        f.write(f"float *state = (float *)state_data;\n")
 
-        # write embedding weights, split onto multiple lines
+        # write embedding weights
         f.write(f'unsigned char emb_data[] = "')
         for i, x in enumerate(tqdm(bytes(model.emb.lazydata.realized.raw()._buf))):
             if i % 32 == 0 and i > 0:
@@ -221,7 +229,13 @@ elif sys.argv[1] == "cmp":
                 f.write(f"\\x%02X" % x)
             f.write('";\n')
 
-            f.write(f"float *{name} = (float *){name}_data;\n")
+        cprog = [
+            f"float {name}[{len}];"
+            if name not in bufs_to_save
+            else f"float *{name} = (float *){name}_data;"
+            for name, len in bufs.values()
+        ]
+        f.write("\n".join(cprog) + "\n")
 
         cprog = list(functions.values())
         f.write("\n".join(cprog) + "\n")
@@ -231,27 +245,51 @@ elif sys.argv[1] == "cmp":
 
         cprog = [
             """
-int main(int argc, char *argv[]) {
-  int idx = 510;
-  for (int i = 0; i < 100; i++) {
-    memcpy(input, &emb[idx], sizeof(float) * 768);
+int main(int argc, char *argv[]) {{
+  // load input
+  memcpy(input, emb + 510, sizeof(float) * 768);
+  memcpy(input + 768, state, sizeof(float) * 12 * 768);
+  net();
+  memcpy(state, output + 50277, sizeof(float) * 12 * 768);
+  memcpy(input, emb + 3158, sizeof(float) * 768);
+  memcpy(input + 768, state, sizeof(float) * 12 * 768);
+  net();
+  memcpy(state, output + 50277, sizeof(float) * 12 * 768);
+  memcpy(input, emb + 8516, sizeof(float) * 768);
+  memcpy(input + 768, state, sizeof(float) * 12 * 768);
+  net();
+  memcpy(state, output + 50277, sizeof(float) * 12 * 768);
+
+  int idx = 8516;
+  for (int i = 0; i < 100; i++) {{
+    memcpy(input, emb + idx, sizeof(float) * {});
+    memcpy(input + {}, state, sizeof(float) * {} * {});
 
     net();
 
+    memcpy(state, output + 50277, sizeof(float) * {} * {});
+
     float best = -INFINITY;
     int best_idx = -1;
-    for (int j = 0; j < 50277; j++) {
-      if (outputs[j] > best) {
-        best = outputs[j];
+    for (int j = 0; j < 50277; j++) {{
+      if (output[j] > best) {{
+        best = output[j];
         best_idx = j;
-      }
-    }
+      }}
+    }}
     printf("Best: %d (%f)\\n", best_idx, best);
 
     idx = best_idx;
-  }
-}
-"""
+  }}
+}}
+""".format(
+                model.embed_size,
+                model.embed_size,
+                model.layers,
+                model.embed_size,
+                model.layers,
+                model.embed_size,
+            )
         ]
         f.write("\n".join(cprog) + "\n")
 

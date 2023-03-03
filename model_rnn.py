@@ -22,6 +22,13 @@ class LayerState:
         self.att_bb = Tensor([0.0] * embed_size)
         self.att_pp = Tensor([-1e30] * embed_size)
 
+    def realize(self):
+        self.ffn_xx = self.ffn_xx.realize()
+        self.att_xx = self.att_xx.realize()
+        self.att_aa = self.att_aa.realize()
+        self.att_bb = self.att_bb.realize()
+        self.att_pp = self.att_pp.realize()
+
 
 class State:
     state: list[LayerState]
@@ -34,6 +41,12 @@ class State:
 
     def __setitem__(self, i: int, v: LayerState) -> None:
         self.states[i] = v
+
+    def realize(self):
+        for state in self.states:
+            state.realize()
+
+        return self
 
 
 class Att:
@@ -70,11 +83,11 @@ class Att:
         self.output = output
 
     def __call__(
-        self, x: Tensor, state: LayerState
+        self, x: Tensor, att_xx, att_aa, att_bb, att_pp
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-        xk = self.time_mix_k * (x - state.att_xx) + state.att_xx
-        xv = self.time_mix_v * (x - state.att_xx) + state.att_xx
-        xr = self.time_mix_r * (x - state.att_xx) + state.att_xx
+        xk = self.time_mix_k * (x - att_xx) + att_xx
+        xv = self.time_mix_v * (x - att_xx) + att_xx
+        xr = self.time_mix_r * (x - att_xx) + att_xx
 
         k = matvec(self.key, xk)
         v = matvec(self.value, xv)
@@ -83,21 +96,21 @@ class Att:
         # calculate output
         ww = k + self.time_first
         eww = ww.exp()
-        epp = state.att_pp.exp()
-        rwkv = r * ((eww * v + epp * state.att_aa) / (eww + epp * state.att_bb))
+        epp = att_pp.exp()
+        rwkv = r * ((eww * v + epp * att_aa) / (eww + epp * att_bb))
 
         # update state
-        ww = state.att_pp + self.time_decay
+        ww = att_pp + self.time_decay
         p = elemmax(ww, k)
         e1 = (ww - p).exp()
         e2 = (k - p).exp()
 
         return (
             matvec(self.output, rwkv),
-            x.realize(),
-            ((e1 * state.att_aa) + (e2 * v)).realize(),
-            ((e1 * state.att_bb) + e2).realize(),
-            p.realize(),
+            x,
+            ((e1 * att_aa) + (e2 * v)),
+            ((e1 * att_bb) + e2),
+            p,
         )
 
 
@@ -122,9 +135,9 @@ class Ffn:
         self.value = value
         self.receptance = receptance
 
-    def __call__(self, x: Tensor, state: LayerState) -> tuple[Tensor, Tensor]:
-        xk = self.time_mix_k * (x - state.ffn_xx) + state.ffn_xx
-        xr = self.time_mix_r * (x - state.ffn_xx) + state.ffn_xx
+    def __call__(self, x: Tensor, ffn_xx: Tensor) -> tuple[Tensor, Tensor]:
+        xk = self.time_mix_k * (x - ffn_xx) + ffn_xx
+        xr = self.time_mix_r * (x - ffn_xx) + ffn_xx
 
         k = matvec(self.key, xk).relu().square()
         kv = matvec(self.value, k)
@@ -192,23 +205,25 @@ class Block:
             ffn_receptance,
         )
 
-    def __call__(self, x: Tensor, state: LayerState) -> tuple[Tensor, LayerState]:
-        new_state = LayerState(self.embed_size)
-
+    def __call__(
+        self,
+        x: Tensor,
+        att_xx: Tensor,
+        att_aa: Tensor,
+        att_bb: Tensor,
+        att_pp: Tensor,
+        ffn_xx: Tensor,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
         ln1 = self.att_ln(x)
-        (
-            att,
-            new_state.att_xx,
-            new_state.att_aa,
-            new_state.att_bb,
-            new_state.att_pp,
-        ) = self.att(ln1, state)
+        att, att_xx, att_aa, att_bb, att_pp = self.att(
+            ln1, att_xx, att_aa, att_bb, att_pp
+        )
         x = x + att
         ln2 = self.ffn_ln(x)
-        ffn, new_state.ffn_xx = self.ffn(ln2, state)
+        ffn, ffn_xx = self.ffn(ln2, ffn_xx)
         x = x + ffn
 
-        return x, new_state
+        return x, att_xx, att_aa, att_bb, att_pp, ffn_xx
 
 
 class RWKV_RNN:
@@ -271,26 +286,94 @@ class RWKV_RNN:
 
         gc.collect()
 
+    def init_state(self) -> Tensor:
+        states = []
+        for _ in range(self.layers):
+            states.append(
+                Tensor.cat(
+                    Tensor([0.0] * self.embed_size),
+                    Tensor([0.0] * self.embed_size),
+                    Tensor([0.0] * self.embed_size),
+                    Tensor([0.0] * self.embed_size),
+                    Tensor([0.0] * self.embed_size),
+                )
+            )
+        return Tensor.cat(*states).realize()
+
     def index_embed(self, ctx: int) -> Tensor:
         return self.emb[ctx]
 
+    def build_jit_input(self, ctx: Tensor, state: Tensor) -> Tensor:
+        return Tensor.cat(ctx, state).realize()
+
     def forward(
-        self, ctx: Tensor | int, state: State | None, preprocess: bool = False
-    ) -> tuple[Tensor, State] | State:
-        if state is None:
-            state = State(self.embed_size, self.layers)
+        self,
+        ctx: Tensor | int,
+        state: Tensor | None = None,
+        preprocess: bool = False,
+        jit: bool = False,
+    ) -> tuple[Tensor, Tensor] | Tensor:
+        if state is None and not jit:
+            state = self.init_state()
 
-        if isinstance(ctx, int):
-            x = self.index_embed(ctx)
+        if jit:
+            x = ctx[: self.embed_size]
+            state = ctx[self.embed_size :]
         else:
-            x = ctx
+            if isinstance(ctx, int):
+                x = self.index_embed(ctx)
+            else:
+                x = ctx
 
+        new_state = []
         for i, block in enumerate(self.blocks):
-            x, state[i] = block(x, state[i])
+            x, att_xx, att_aa, att_bb, att_pp, ffn_xx = block(
+                x,
+                state[
+                    i * 5 * self.embed_size
+                    + 0 * self.embed_size : i * 5 * self.embed_size
+                    + 1 * self.embed_size
+                ],
+                state[
+                    i * 5 * self.embed_size
+                    + 1 * self.embed_size : i * 5 * self.embed_size
+                    + 2 * self.embed_size
+                ],
+                state[
+                    i * 5 * self.embed_size
+                    + 2 * self.embed_size : i * 5 * self.embed_size
+                    + 3 * self.embed_size
+                ],
+                state[
+                    i * 5 * self.embed_size
+                    + 3 * self.embed_size : i * 5 * self.embed_size
+                    + 4 * self.embed_size
+                ],
+                state[
+                    i * 5 * self.embed_size
+                    + 4 * self.embed_size : i * 5 * self.embed_size
+                    + 5 * self.embed_size
+                ],
+            )
+
+            new_state.append(
+                Tensor.cat(
+                    att_xx.realize(),
+                    att_aa.realize(),
+                    att_bb.realize(),
+                    att_pp.realize(),
+                    ffn_xx.realize(),
+                )
+            )
+
+        state = Tensor.cat(*new_state)
 
         if not preprocess:
             x = x.layernorm().linear(self.ln_out_weight, self.ln_out_bias)
             x = matvec(self.head, x)
+
+            if jit:
+                return Tensor.cat(x, state)
 
             return x, state
         return state

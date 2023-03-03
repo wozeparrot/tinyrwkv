@@ -64,21 +64,17 @@ def compile_net(run, special_names):
         ] = fxn.prg  # NOTE: this assumes all with the same name are the same
         cargs = []
         for i, arg in enumerate(args):
-            if i in fxn.bufs_to_delete:
-                continue
-            key = id(arg.raw())
+            key = id(arg)
             if key not in bufs:
                 if key in special_names:
-                    bufs[key] = (special_names[key], len(arg.raw()._buf))
+                    bufs[key] = (special_names[key], len(arg._buf))
                 else:
-                    bufs[key] = (f"buf_{bufnum}", len(arg.raw()._buf))
+                    bufs[key] = (f"buf_{bufnum}", len(arg._buf))
                     bufnum += 1
                     if i > 0:
                         bufs_to_save[
                             bufs[key][0]
-                        ] = (
-                            arg.raw()
-                        )  # if first usage of a buffer is not an output, and it's not a special name
+                        ] = arg  # if first usage of a buffer is not an output, and it's not a special name
             cargs.append(bufs[key][0])
         statements.append(f"{fxn.name}({', '.join(cargs)});")
 
