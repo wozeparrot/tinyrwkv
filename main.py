@@ -40,7 +40,7 @@ def count_parameters(model):
 
 
 if len(sys.argv) < 2:
-    print("Usage: python main.py [pre|gen|gra|gpt|tra]")
+    print("Usage: python main.py [pre|gen|gra|cmp|gpt|tra]")
     print("  pre: preprocess weights")
     print("  gen: generate text with the rnn mode")
     print("  gra: use with GRAPH=1 to generate a graph of the rnn mode")
