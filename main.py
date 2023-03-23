@@ -1,6 +1,5 @@
-from tinygrad.ops import GlobalCounters
 from model_gpt import RWKV_GPT
-from model_rnn import RWKV_RNN, State
+from model_rnn import RWKV_RNN
 from utils import sample_logits
 
 from tinygrad.nn.optim import get_parameters
@@ -45,6 +44,7 @@ if len(sys.argv) < 2:
     print("  pre: preprocess weights")
     print("  gen: generate text with the rnn mode")
     print("  gra: use with GRAPH=1 to generate a graph of the rnn mode")
+    print("  cmp: attempt to compile the rnn mode to c (broken)")
     print("  gpt: generate text with the gpt mode")
     print("  tra: train with gpt mode")
     sys.exit(1)
@@ -91,22 +91,39 @@ elif sys.argv[1] == "gen":
     # load model
     model = RWKV_RNN(1024, 50277, 1024, 24, "./weights.pkl")
 
-    # run model once to move weights to correct device
-    model.forward(187, None)
+    # jit
+    from tinygrad.jit import TinyJit
+
+    @TinyJit
+    def run(x):
+        ret = model.forward(x, jit=True)
+        return ret.realize()
+
+    embed = Tensor(model.index_embed(510).numpy())
+    state = model.init_state()
+    the_input = model.build_jit_input(embed, state)
+
+    # run model twice to initialize the jit
+    the_output = run(the_input)
+    the_output = run(the_input)
 
     # encode initial context
-    ctx_str = "The quick brown"
+    ctx_str = """
+This is a test of the emergency broadcast system. This is only a test. If this had been an actual emergency, you would have been instructed to do something. This concludes this test of the emergency broadcast system.
+"""
     ctx = tokenizer.encode(ctx_str).ids
 
     # encode separator
     sep = tokenizer.encode("\n\n").ids
 
     print("Preprocessing...")
-    state = None
+    state = model.init_state()
     for i in tqdm(range(len(ctx))):
         x = np.concatenate([sep, ctx[:i]])
-        state = model.forward(int(x[-1]), state, True)
-        state.realize()
+        embed = model.index_embed(int(x[-1]))
+        the_input = model.build_jit_input(embed, state)
+        out = run(the_input)
+        state = out[50277:]
     last_token = np.concatenate([sep, ctx])[-1]
 
     print()
@@ -118,9 +135,13 @@ elif sys.argv[1] == "gen":
     alpha_counter = np.zeros(50277)
     out = ""
     while True:
-        logits, state = model.forward(int(last_token), state)
-        state.realize()
-        logits = logits.numpy()
+        embed = model.index_embed(int(last_token))
+        the_input = model.build_jit_input(embed, state)
+        the_output = run(the_input)
+        logits = the_output[:50277]
+        state = the_output[50277:]
+        # logits to cpu
+        logits = logits.cpu().numpy()
         logits.flags.writeable = True
 
         # disable <|endoftext|> token
@@ -131,7 +152,7 @@ elif sys.argv[1] == "gen":
             logits,
             alpha_counter=alpha_counter,
             alpha_presence=0.1,
-            alpha_frequency=0.1,
+            alpha_frequency=0.2,
             temperature=0.8,
             top_p=0.9,
             top_k=35,
@@ -146,10 +167,10 @@ elif sys.argv[1] == "gen":
         out += last_decoded
 
         # break if we reach the "end" of text
-        if tokens[-1] == 0:
-            break
-        if out.endswith(("<|endoftext|>", "\n\n")):
-            break
+        # if tokens[-1] == 0:
+        #     break
+        # if out.endswith(("<|endoftext|>", "\n\n")):
+        #     break
 elif sys.argv[1] == "gra":
     Tensor.no_grad = True
 

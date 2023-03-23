@@ -8,47 +8,6 @@ import gc
 from utils import matvec, elemmax
 
 
-class LayerState:
-    ffn_xx: Tensor
-    att_xx: Tensor
-    att_aa: Tensor
-    att_bb: Tensor
-    att_pp: Tensor
-
-    def __init__(self, embed_size: int):
-        self.ffn_xx = Tensor([0.0] * embed_size)
-        self.att_xx = Tensor([0.0] * embed_size)
-        self.att_aa = Tensor([0.0] * embed_size)
-        self.att_bb = Tensor([0.0] * embed_size)
-        self.att_pp = Tensor([-1e30] * embed_size)
-
-    def realize(self):
-        self.ffn_xx = self.ffn_xx.realize()
-        self.att_xx = self.att_xx.realize()
-        self.att_aa = self.att_aa.realize()
-        self.att_bb = self.att_bb.realize()
-        self.att_pp = self.att_pp.realize()
-
-
-class State:
-    state: list[LayerState]
-
-    def __init__(self, embed_size: int, layers: int):
-        self.states = [LayerState(embed_size) for _ in range(layers)]
-
-    def __getitem__(self, i: int) -> LayerState:
-        return self.states[i]
-
-    def __setitem__(self, i: int, v: LayerState) -> None:
-        self.states[i] = v
-
-    def realize(self):
-        for state in self.states:
-            state.realize()
-
-        return self
-
-
 class Att:
     time_mix_k: Tensor
     time_mix_v: Tensor
@@ -294,7 +253,7 @@ class RWKV_RNN:
                     Tensor([0.0] * self.embed_size),
                     Tensor([0.0] * self.embed_size),
                     Tensor([0.0] * self.embed_size),
-                    Tensor([0.0] * self.embed_size),
+                    Tensor([-1e30] * self.embed_size),
                     Tensor([0.0] * self.embed_size),
                 )
             )
@@ -373,7 +332,7 @@ class RWKV_RNN:
             x = matvec(self.head, x)
 
             if jit:
-                return Tensor.cat(x, state)
+                return Tensor.cat(x.realize(), state.realize())
 
             return x, state
         return state
