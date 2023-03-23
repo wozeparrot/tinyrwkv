@@ -42,7 +42,7 @@ def sample_logits(
 
 
 def matvec(mat: Tensor, vec: Tensor) -> Tensor:
-    return mat.mul(vec).sum(axis=1)
+    return vec @ mat.T
 
 
 def elemmax(x: Tensor, y: Tensor) -> Tensor:
