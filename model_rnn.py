@@ -54,9 +54,17 @@ class Att:
 
         # calculate output
         ww = k + self.time_first
-        eww = ww.exp()
-        epp = att_pp.exp()
-        rwkv = r * ((eww * v + epp * att_aa) / (eww + epp * att_bb))
+
+        p = elemmax(att_pp, ww)
+        e1 = (att_pp - p).exp()
+        e2 = (ww - p).exp()
+        a = (e1 * att_aa) + (e2 * v)
+        b = (e1 * att_bb) + e2
+        rwkv = r * (a / b)
+
+        # eww = ww.exp()
+        # epp = att_pp.exp()
+        # rwkv = r * ((eww * v + epp * att_aa) / (eww + epp * att_bb))
 
         # update state
         ww = att_pp + self.time_decay
