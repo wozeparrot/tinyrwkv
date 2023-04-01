@@ -42,18 +42,29 @@ def count_parameters(model):
 if len(sys.argv) < 2:
     print("Usage: python main.py [pre|gen|gra|cmp|gpt|tra]")
     print("  pre: preprocess weights")
+    print("    `python main.py pre <.pth> <outfile>`")
     print("  gen: generate text with the rnn mode")
+    print("    `python main.py gen <.pkl> [prompt]`")
+    print("    Run with GPU=1 for much faster inference on gpu")
     print("  gra: use with GRAPH=1 to generate a graph of the rnn mode")
+    print("    `GRAPH=1 python main.py gra`")
     print("  cmp: attempt to compile the rnn mode to c (broken)")
+    print("    `python main.py cmp > out.c`")
     print("  gpt: generate text with the gpt mode")
-    print("  tra: train with gpt mode")
+    print("    `python main.py gpt`")
+    print("  tra: train with gpt mode (broken)")
+    print("    `python main.py tra`")
     sys.exit(1)
 
 if sys.argv[1] == "pre":
+    if len(sys.argv) < 4:
+        print("Usage: python main.py pre <.pth> <outfile>")
+        sys.exit(1)
+
     # load weights
     import torch
 
-    weights = torch.load("./RWKV-4-Pile-430M-20220808-8066.pth", map_location="cpu")
+    weights = torch.load(sys.argv[2], map_location="cpu")
 
     # refine weights
     for k, v in tqdm(weights.items()):
@@ -80,16 +91,20 @@ if sys.argv[1] == "pre":
     import pickle
 
     print("Writing weights...")
-    pickle.dump(weights, open("weights.pkl", "wb"))
+    pickle.dump(weights, open(sys.argv[3], "wb"))
 
 elif sys.argv[1] == "gen":
+    if len(sys.argv) < 3:
+        print("Usage: python main.py gen <.pkl> [prompt]")
+        sys.exit(1)
+
     Tensor.no_grad = True
 
     # load tokenizer
     tokenizer = Tokenizer.from_file("tokenizer.json")
 
     # load model
-    model = RWKV_RNN(1024, 50277, 1024, 24, "./weights.pkl")
+    model = RWKV_RNN(2048, 50277, 2048, 24, sys.argv[2])
 
     # jit
     from tinygrad.jit import TinyJit
@@ -108,9 +123,13 @@ elif sys.argv[1] == "gen":
     the_output = run(the_input)
 
     # encode initial context
-    ctx_str = """
+    ctx_str = (
+        """
 This is a test of the emergency broadcast system. This is only a test. If this had been an actual emergency, you would have been instructed to do something. This concludes this test of the emergency broadcast system.
 """
+        if len(sys.argv) < 4
+        else sys.argv[3]
+    )
     ctx = tokenizer.encode(ctx_str).ids
 
     # encode separator
@@ -142,19 +161,15 @@ This is a test of the emergency broadcast system. This is only a test. If this h
         state = the_output[50277:]
         # logits to cpu
         logits = logits.cpu().numpy()
-        logits.flags.writeable = True
-
-        # disable <|endoftext|> token
-        logits[0] = float("-Inf")
 
         # sample
         sampled = sample_logits(
             logits,
             alpha_counter=alpha_counter,
-            alpha_presence=0.1,
+            alpha_presence=0.2,
             alpha_frequency=0.2,
-            temperature=0.8,
-            top_p=0.9,
+            temperature=1.0,
+            top_p=0.8,
             top_k=35,
         )
 
@@ -165,12 +180,6 @@ This is a test of the emergency broadcast system. This is only a test. If this h
         last_decoded = tokenizer.decode([last_token])
         print(last_decoded, end="", flush=True)
         out += last_decoded
-
-        # break if we reach the "end" of text
-        # if tokens[-1] == 0:
-        #     break
-        # if out.endswith(("<|endoftext|>", "\n\n")):
-        #     break
 elif sys.argv[1] == "gra":
     Tensor.no_grad = True
 
@@ -182,13 +191,17 @@ elif sys.argv[1] == "gra":
 
     print(model.forward(187, None))
 elif sys.argv[1] == "cmp":
+    if len(sys.argv) < 3:
+        print("Usage: python main.py cmp <.pkl>")
+        sys.exit(1)
+
     Tensor.no_grad = True
 
     # seed random
     np.random.seed(42)
 
     # load model
-    model = RWKV_RNN(1024, 50277, 768, 12, "./weights-169m.pkl")
+    model = RWKV_RNN(1024, 50277, 768, 12, sys.argv[2])
 
     from tinygrad.jit import TinyJit
 
@@ -198,17 +211,19 @@ elif sys.argv[1] == "cmp":
         return ret.realize()
 
     embed = Tensor(model.index_embed(510).numpy())
-    init_state = model.init_state()
-    the_input = model.build_jit_input(embed, init_state)
-    out = run(the_input)
-    out = run(the_input)
+    state = model.init_state()
+    the_input = model.build_jit_input(embed, state)
+
+    # run model twice to initialize the jit
+    the_output = run(the_input)
+    the_output = run(the_input)
 
     for (j, i), idx in run.input_replace.items():
-        run.jit_cache[j][1][i] = the_input.lazydata.realized.raw()
+        run.jit_cache[j][1][i] = the_input.lazydata.realized
 
     special_names = {
-        id(the_input.lazydata.realized.raw()): "input",
-        id(out.lazydata.realized.raw()): "output",
+        id(the_input.lazydata.realized): "input",
+        id(the_output.lazydata.realized): "output",
     }
 
     from utils import compile_net
@@ -226,7 +241,7 @@ elif sys.argv[1] == "cmp":
 
         # write init state
         f.write(f'unsigned char state_data[] = "')
-        for i, x in enumerate(tqdm(bytes(init_state.lazydata.realized.raw()._buf))):
+        for i, x in enumerate(tqdm(bytes(state.lazydata.realized._buf))):
             if i % 32 == 0 and i > 0:
                 f.write('"\n"')
             f.write(f"\\x%02X" % x)
@@ -235,7 +250,7 @@ elif sys.argv[1] == "cmp":
 
         # write embedding weights
         f.write(f'unsigned char emb_data[] = "')
-        for i, x in enumerate(tqdm(bytes(model.emb.lazydata.realized.raw()._buf))):
+        for i, x in enumerate(tqdm(bytes(model.emb.lazydata.realized._buf))):
             if i % 32 == 0 and i > 0:
                 f.write('"\n"')
             f.write(f"\\x%02X" % x)
@@ -352,7 +367,7 @@ elif sys.argv[1] == "gpt":
     gc.collect()
 
     # make fast
-    model.forward(Tensor(np.array([[187, 510]])))
+    model.forward(Tensor(np.array([[187, 510]], dtype=np.float32)))
 
     # encode initial context
     ctx_str = "The quick brown"
