@@ -29,7 +29,7 @@ def sample_logits(
         logits[indices_to_remove] = float("-Inf")
 
     # top-p sampling
-    probs = Tensor(logits).softmax().numpy()
+    probs = np.exp(logits) / np.sum(np.exp(logits), axis=-1, keepdims=True)
     sorted_probs = np.sort(probs)[::-1]
     cumulative_probs = np.cumsum(sorted_probs)
     cutoff = float(sorted_probs[np.argmax(cumulative_probs > top_p)])
