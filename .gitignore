@@ -6,6 +6,8 @@ build/
 # ignore model weights
 *.pth
 *.pkl
+*.pkl.json
+*.bin
 
 # ignore training data
 *.npy
