@@ -10,7 +10,8 @@ def sample_logits(
     alpha_frequency: float = 0.0,
     temperature: float = 0.8,
     top_p: float = 0.9,
-    top_k: int = 35,
+    typical_p: float = 0.0,
+    top_k: int = 50,
 ) -> int:
     if temperature == 0.0:
         return int(np.argmax(logits))
@@ -28,12 +29,38 @@ def sample_logits(
         indices_to_remove = logits < np.partition(logits, -top_k)[-top_k]
         logits[indices_to_remove] = float("-Inf")
 
-    # top-p sampling
     probs = np.exp(logits) / np.sum(np.exp(logits), axis=-1, keepdims=True)
-    sorted_probs = np.sort(probs)[::-1]
-    cumulative_probs = np.cumsum(sorted_probs)
-    cutoff = float(sorted_probs[np.argmax(cumulative_probs > top_p)])
-    probs[probs < cutoff] = 0
+
+    # top-p sampling
+    if top_p > 0.0:
+        sorted_probs = np.sort(probs)[::-1]
+        cumulative_probs = np.cumsum(sorted_probs)
+        cutoff = float(sorted_probs[np.argmax(cumulative_probs > top_p)])
+        probs[probs < cutoff] = 0
+        if temperature != 1.0:
+            probs = pow(probs, 1.0 / temperature)
+        probs = probs / np.sum(probs, axis=0)
+        out = np.random.choice(a=len(probs), p=probs)
+        return out
+
+    # typical sampling
+    if typical_p > 0.0:
+        logits = -np.log(probs)
+        entropy = np.nansum(logits * probs, axis=-1, keepdims=True)
+        logits = np.abs(logits - entropy)
+        sorted_idxs = np.argsort(logits)
+        sorted_logits = logits[sorted_idxs]
+        sorted_probs = probs[sorted_idxs]
+        cumulative_probs = np.cumsum(sorted_probs, axis=-1)
+        cutoff = np.sum(cumulative_probs < typical_p)
+        probs[logits > sorted_logits[cutoff]] = 0
+        if temperature != 1.0:
+            probs = pow(probs, 1.0 / temperature)
+        probs = probs / np.sum(probs, axis=0)
+        out = np.random.choice(a=len(probs), p=probs)
+        return out
+
+    # default sampling
     if temperature != 1.0:
         probs = pow(probs, 1.0 / temperature)
     probs = probs / np.sum(probs, axis=0)
@@ -67,9 +94,9 @@ def compile_net(run, special_names):
             key = id(arg)
             if key not in bufs:
                 if key in special_names:
-                    bufs[key] = (special_names[key], len(arg._buf))
+                    bufs[key] = (special_names[key], len(arg._buf), arg.dtype)
                 else:
-                    bufs[key] = (f"buf_{bufnum}", len(arg._buf))
+                    bufs[key] = (f"buf_{bufnum}", len(arg._buf), arg.dtype)
                     bufnum += 1
                     if i > 0:
                         bufs_to_save[
