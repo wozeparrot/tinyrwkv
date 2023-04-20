@@ -1,3 +1,4 @@
+from tinygrad.nn.optim import get_parameters
 from tinygrad.tensor import Tensor
 import numpy as np
 
@@ -108,3 +109,26 @@ def compile_net(run, special_names):
         statements.append(f"{fxn.name}({', '.join(cargs)});")
 
     return functions, statements, bufs, bufs_to_save
+
+
+def get_child(parent, key):
+    obj = parent
+    for k in key.split("."):
+        if k.isnumeric():
+            obj = obj[int(k)]
+        elif isinstance(obj, dict):
+            obj = obj[k]
+        else:
+            obj = getattr(obj, k)
+    return obj
+
+
+def count_parameters(model):
+    params = get_parameters(model)
+    count = 0
+    for p in params:
+        param_count = 1
+        for s in p.shape:
+            param_count *= s
+        count += param_count
+    return count

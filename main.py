@@ -1,6 +1,6 @@
 from model_gpt import RWKV_GPT
 from model_rnn import RWKV_RNN
-from utils import sample_logits
+from utils import sample_logits, get_child, count_parameters
 
 from tinygrad.nn.optim import get_parameters, get_state_dict
 from tinygrad.tensor import Tensor
@@ -16,29 +16,6 @@ import os
 
 
 np.set_printoptions(precision=4, suppress=True, linewidth=200)
-
-
-def get_child(parent, key):
-    obj = parent
-    for k in key.split("."):
-        if k.isnumeric():
-            obj = obj[int(k)]
-        elif isinstance(obj, dict):
-            obj = obj[k]
-        else:
-            obj = getattr(obj, k)
-    return obj
-
-
-def count_parameters(model):
-    params = get_parameters(model)
-    count = 0
-    for p in params:
-        param_count = 1
-        for s in p.shape:
-            param_count *= s
-        count += param_count
-    return count
 
 
 if len(sys.argv) < 2:
