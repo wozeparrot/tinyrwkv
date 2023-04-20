@@ -1,3 +1,4 @@
+from typing import Union
 from tinygrad.nn.optim import get_parameters
 from tinygrad.tensor import Tensor
 import numpy as np
@@ -6,7 +7,7 @@ import numpy as np
 def sample_logits(
     logits: np.ndarray,
     *,
-    alpha_counter: np.ndarray | None = None,
+    alpha_counter: Union[np.ndarray, None] = None,
     alpha_presence: float = 0.0,
     alpha_frequency: float = 0.0,
     temperature: float = 0.8,
