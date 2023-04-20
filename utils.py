@@ -13,6 +13,8 @@ def sample_logits(
     typical_p: float = 0.0,
     top_k: int = 50,
 ) -> int:
+    logits = np.nan_to_num(logits)
+
     if temperature == 0.0:
         return int(np.argmax(logits))
 
