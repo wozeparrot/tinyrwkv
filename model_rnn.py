@@ -1,9 +1,10 @@
 from tinygrad.tensor import Tensor
 import tinygrad.nn as nn
-import pickle
 from tqdm import tqdm
 
 import gc
+import json
+import pickle
 
 from utils import matvec, elemmax
 
@@ -190,14 +191,21 @@ class Block:
         ffn, ffn_xx = self.ffn(ln2, ffn_xx)
         x = x + ffn
 
-        return x, att_xx, att_aa, att_bb, att_pp, ffn_xx
+        return (
+            x,
+            att_xx.realize(),
+            att_aa.realize(),
+            att_bb.realize(),
+            att_pp.realize(),
+            ffn_xx.realize(),
+        )
 
 
 class RWKV_RNN:
-    ctx_size: int
     vocab_size: int
     embed_size: int
     layers: int
+    dtype: str
 
     emb: Tensor
     blocks: list[Block]
@@ -205,15 +213,18 @@ class RWKV_RNN:
     ln_out_bias: Tensor
     head: Tensor
 
-    def __init__(
-        self, ctx_size: int, vocab_size: int, embed_size: int, layers: int, path: str
-    ):
-        self.ctx_size = ctx_size
-        self.vocab_size = vocab_size
-        self.embed_size = embed_size
-        self.layers = layers
+    def __init__(self, path: str):
+        # load info file
+        with open(path + ".json", "r") as f:
+            info = json.load(f)
 
-        weights = pickle.load(open(path, "rb"))
+        self.vocab_size = info["vocab_size"]
+        self.embed_size = info["embed_size"]
+        self.layers = info["layers"]
+        self.dtype = info["dtype"]
+
+        with open(path, "rb") as f:
+            weights = pickle.load(f)
         tg_weights = {}
         for k, v in tqdm(weights.items()):
             tg_weights[k] = Tensor(v)
@@ -221,10 +232,10 @@ class RWKV_RNN:
         self.emb = tg_weights["emb.weight"]
 
         self.blocks = []
-        for i in range(layers):
+        for i in range(self.layers):
             self.blocks.append(
                 Block(
-                    embed_size,
+                    self.embed_size,
                     tg_weights[f"blocks.{i}.ln1.weight"],
                     tg_weights[f"blocks.{i}.ln1.bias"],
                     tg_weights[f"blocks.{i}.att.time_mix_k"],
@@ -270,27 +281,15 @@ class RWKV_RNN:
     def index_embed(self, ctx: int) -> Tensor:
         return self.emb[ctx]
 
-    def build_jit_input(self, ctx: Tensor, state: Tensor) -> Tensor:
+    def build_input(self, ctx: Tensor, state: Tensor) -> Tensor:
         return Tensor.cat(ctx, state).realize()
 
     def forward(
         self,
-        ctx: Tensor | int,
-        state: Tensor | None = None,
-        preprocess: bool = False,
-        jit: bool = False,
-    ) -> tuple[Tensor, Tensor] | Tensor:
-        if state is None and not jit:
-            state = self.init_state()
-
-        if jit:
-            x = ctx[: self.embed_size]
-            state = ctx[self.embed_size :]
-        else:
-            if isinstance(ctx, int):
-                x = self.index_embed(ctx)
-            else:
-                x = ctx
+        ctx: Tensor,
+    ) -> Tensor:
+        x = ctx[: self.embed_size]
+        state = ctx[self.embed_size :]
 
         new_state = []
         for i, block in enumerate(self.blocks):
@@ -323,24 +322,11 @@ class RWKV_RNN:
                 ],
             )
 
-            new_state.append(
-                Tensor.cat(
-                    att_xx.realize(),
-                    att_aa.realize(),
-                    att_bb.realize(),
-                    att_pp.realize(),
-                    ffn_xx.realize(),
-                )
-            )
+            new_state.append(Tensor.cat(att_xx, att_aa, att_bb, att_pp, ffn_xx))
 
         state = Tensor.cat(*new_state)
 
-        if not preprocess:
-            x = x.layernorm().linear(self.ln_out_weight, self.ln_out_bias)
-            x = matvec(self.head, x)
+        x = x.layernorm().linear(self.ln_out_weight, self.ln_out_bias)
+        x = matvec(self.head, x)
 
-            if jit:
-                return Tensor.cat(x.realize(), state.realize())
-
-            return x, state
-        return state
+        return Tensor.cat(x, state)
