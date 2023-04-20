@@ -1,6 +1,6 @@
 from tinygrad.jit import TinyJit
 from tinygrad.tensor import Tensor
-from typing import Callable, cast
+from typing import Callable, Union, cast
 import numpy as np
 import tinygrad.nn as nn
 
@@ -71,6 +71,17 @@ class ChannelMix:
 
 
 class WKV:
+    ctx_size: int
+
+    time_curve: Tensor
+
+    def __init__(self, ctx_size: int):
+        self.ctx_size = ctx_size
+
+        self.time_curve = Tensor(
+            [-(ctx_size - 2 - i) for i in range(ctx_size - 1)], requires_grad=False
+        )
+
     def __call__(
         self,
         T: int,
@@ -79,14 +90,13 @@ class WKV:
         time_decay: Tensor,
         key: Tensor,
         value: Tensor,
-        time_curve: Tensor,
     ) -> Tensor:
         ek = key.clip(-60, 60).transpose(1, 2).exp()
         ekv = ek * value.transpose(1, 2)
 
-        time_w = (time_first.exp().unsqueeze(1) * time_curve).cat(
-            time_decay.unsqueeze(1), dim=-1
-        )
+        time_w = (
+            time_first.exp().unsqueeze(1) * self.time_curve[self.ctx_size - T :]
+        ).cat(time_decay.unsqueeze(1), dim=-1)
         w = time_w.exp().unsqueeze(1)
         w = w.reshape(w.shape[0], w.shape[1], w.shape[2], 1)
 
@@ -116,8 +126,6 @@ class WKV:
 
 
 class TimeMix:
-    embed_size: int
-
     time_decay: Tensor
 
     time_first: Tensor
@@ -134,9 +142,7 @@ class TimeMix:
 
     output: nn.Linear
 
-    def __init__(self, i: int, embed_size: int, layers: int):
-        self.embed_size = embed_size
-
+    def __init__(self, i: int, ctx_size: int, embed_size: int, layers: int):
         ratio_0_to_1 = i / (layers - 1)
         ratio_1_to_almost_0 = 1.0 - (i / layers)
 
@@ -165,7 +171,7 @@ class TimeMix:
         self.receptance = nn.Linear(embed_size, embed_size, bias=False)
         self.value = nn.Linear(embed_size, embed_size, bias=False)
 
-        self.wkv = WKV()
+        self.wkv = WKV(ctx_size)
 
         self.output = nn.Linear(embed_size, embed_size, bias=False)
 
@@ -186,8 +192,7 @@ class TimeMix:
         v = self.value(xv)
 
         _, T, C = x.shape
-        time_curve = Tensor([-(T - 2 - i) for i in range(T - 1)], requires_grad=False)
-        rwkv = r * self.wkv(T, C, self.time_decay, self.time_first, k, v, time_curve)
+        rwkv = r * self.wkv(T, C, self.time_decay, self.time_first, k, v)
 
         rwkv = self.output(rwkv)
         return rwkv
@@ -196,7 +201,7 @@ class TimeMix:
 class Block:
     i: int
 
-    ln0: nn.LayerNorm | None = None
+    ln0: Union[nn.LayerNorm, None] = None
 
     ln1: nn.LayerNorm
     ln2: nn.LayerNorm
@@ -204,7 +209,7 @@ class Block:
     att: TimeMix
     ffn: ChannelMix
 
-    def __init__(self, i: int, embed_size: int, layers: int):
+    def __init__(self, i: int, ctx_size: int, embed_size: int, layers: int):
         self.i = i
 
         if i == 0:
@@ -213,7 +218,7 @@ class Block:
         self.ln1 = nn.LayerNorm(embed_size)
         self.ln2 = nn.LayerNorm(embed_size)
 
-        self.att = TimeMix(i, embed_size, layers)
+        self.att = TimeMix(i, ctx_size, embed_size, layers)
         self.ffn = ChannelMix(i, embed_size, layers)
 
     def __call__(self, x: Tensor) -> Tensor:
@@ -250,7 +255,7 @@ class RWKV_GPT:
 
         self.blocks = []
         for i in range(layers):
-            self.blocks.append(Block(i, embed_size, layers))
+            self.blocks.append(Block(i, ctx_size, embed_size, layers))
 
         self.ln_out = nn.LayerNorm(embed_size)
         self.head = nn.Linear(embed_size, vocab_size, bias=False)
