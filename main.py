@@ -398,17 +398,12 @@ elif sys.argv[1] == "gpt":
     print(f"model has ~{count_parameters(model) / 1000 / 1000}M parameters")
 
     # load weights
-    import torch
-
-    weights = torch.load("./RWKV-4-Pile-169M-20220807-8023.pth", map_location="cpu")
-    # convert to tinygrad
-    tg_weights = {}
-    for k, v in tqdm(weights.items()):
-        tg_weights[k] = v.float().numpy()
+    with open(f"tra_ckpts/epoch_5.weights.pkl", "rb") as f:
+        weights = pickle.load(f)
 
     loaded = 0
     skipped = 0
-    for k, v in tqdm(tg_weights.items()):
+    for k, v in tqdm(weights.items()):
         try:
             w = get_child(model, k)
             loaded += 1
@@ -417,11 +412,10 @@ elif sys.argv[1] == "gpt":
             skipped += 1
         if w is not None:
             assert w.shape == v.shape
-            w.assign(v.astype(np.float32))
+            w.assign(v)
 
     print(f"loaded {loaded} weights, skipped {skipped} weights")
-
-    # cleanup extra memory
+    del weights
     gc.collect()
 
     # make fast
@@ -572,7 +566,7 @@ elif sys.argv[1] == "tra":
 
         # save model
         print("saving model...")
-        with open(f"epoch_{epoch + 1}.weights.pkl", "wb") as f:
+        with open(f"tra_ckpts/epoch_{epoch + 1}.weights.pkl", "wb") as f:
             weights = {}
             for key, param in get_state_dict(model).items():
                 weights[key] = param.numpy()
@@ -580,7 +574,7 @@ elif sys.argv[1] == "tra":
 
         # save optimizer
         print("saving optimizer...")
-        with open(f"epoch_{epoch + 1}.optimizer.pkl", "wb") as f:
+        with open(f"tra_ckpts/epoch_{epoch + 1}.optimizer.pkl", "wb") as f:
             t = optimizer.t.numpy()
             m = []
             for tensor in optimizer.m:
