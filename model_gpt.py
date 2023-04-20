@@ -1,11 +1,10 @@
-from typing import Callable, cast
-import tinygrad.nn as nn
+from tinygrad.jit import TinyJit
 from tinygrad.tensor import Tensor
+from typing import Callable, cast
 import numpy as np
+import tinygrad.nn as nn
 
 import math
-
-from utils import matvec, elemmax
 
 
 class Embedding:
@@ -16,14 +15,16 @@ class Embedding:
     def __init__(self, vocab_size: int, embed_size: int):
         self.vocab_size = vocab_size
         self.embed_size = embed_size
-        self.weight = Tensor.uniform(vocab_size, embed_size)
+        self.weight = Tensor.scaled_uniform(vocab_size, embed_size)
 
     def __call__(self, idx: Tensor) -> Tensor:
         idxnp = idx.numpy().astype(np.int32)
         onehot = np.zeros(
             (idx.shape[0], idx.shape[1], self.vocab_size), dtype=np.float32
         )
-        onehot[np.arange(idx.shape[0]), np.arange(idx.shape[1]), idxnp] = 1
+        for i in range(idx.shape[0]):
+            onehot[i, np.arange(idx.shape[1]), idxnp[i]] = 1
+
         return Tensor(onehot) @ self.weight
 
 
@@ -38,7 +39,7 @@ class ChannelMix:
     def __init__(self, i: int, embed_size: int, layers: int):
         ratio_1_to_almost_0 = 1.0 - (i / layers)
 
-        x = np.ones((1, 1, embed_size))
+        x = np.ones((1, 1, embed_size), dtype=np.float32)
         for i in range(embed_size):
             x[0, 0, i] = i / embed_size
 
@@ -72,63 +73,46 @@ class ChannelMix:
 class WKV:
     def __call__(
         self,
-        B: int,
         T: int,
         C: int,
         time_first: Tensor,
         time_decay: Tensor,
         key: Tensor,
         value: Tensor,
+        time_curve: Tensor,
     ) -> Tensor:
-        time_first = -(time_first.exp())
-        key = key.transpose((1, 0, 2))
-        value = value.transpose((1, 0, 2))
-        sl = []
-        s = 2
-        while s <= T:
-            sl += [(s, (s >> 1) - 1, s - 1, T - T % s)]
-            s = s << 1
-        s = s >> 1
-        while s >= 2:
-            sl += [(s, s - 1, (s >> 1) * 3 - 1, T - (T % s < (s >> 1)) * (s >> 1))]
-            s = s >> 1
+        ek = key.clip(-60, 60).transpose(1, 2).exp()
+        ekv = ek * value.transpose(1, 2)
 
-        # only section that is still numpy
-        oo = key.detach().numpy()
-        pp = value.detach().numpy()
-        qq = np.ones((T, B, C))
-        dd = np.ones((T, 1, 1))
-        for ss, sa, sb, sz in sl:
-            p = pp[sb:sz:ss]
-            q = qq[sb:sz:ss]
-            d = dd[sb:sz:ss]
-            o = oo[sb:sz:ss]
+        time_w = (time_first.exp().unsqueeze(1) * time_curve).cat(
+            time_decay.unsqueeze(1), dim=-1
+        )
+        w = time_w.exp().unsqueeze(1)
+        w = w.reshape(w.shape[0], w.shape[1], w.shape[2], 1)
 
-            e = oo[sa:sz:ss] + d * time_first.numpy()
+        ekv = (
+            ekv.reshape(1, *ekv.shape)
+            .pad2d((T - 1, 0, 0, 0))
+            .reshape(ekv.shape[0], ekv.shape[1], ekv.shape[2] + T - 1, 1)
+        )
+        wkv = ekv.conv2d(w, groups=C).reshape(
+            ekv.shape[0], ekv.shape[1], ekv.shape[2] - T + 1
+        )
+        ek = (
+            ek.reshape(1, *ek.shape)
+            .pad2d((T - 1, 0, 0, 0))
+            .reshape(ek.shape[0], ek.shape[1], ek.shape[2] + T - 1, 1)
+        )
+        wk = (
+            ek.conv2d(w, groups=C).reshape(
+                ek.shape[0], ek.shape[1], ek.shape[2] - T + 1
+            )
+            + 1e-8
+        )
 
-            x = np.maximum(e, o)
-            a = np.exp(e - x)
-            b = np.exp(o - x)
+        wkv = (wkv / wk).transpose(1, 2)
 
-            p[:] = a * pp[sa:sz:ss] + b * p
-            q[:] = a * qq[sa:sz:ss] + b * q
-            d[:] = dd[sa:sz:ss] + d
-            o[:] = x
-
-        pt = Tensor(pp, requires_grad=False)
-        p = pt[-1:, :, :].cat(pt[:-1, :, :], dim=0)
-        pq = Tensor(qq, requires_grad=False)
-        q = pq[-1:, :, :].cat(pq[:-1, :, :], dim=0)
-        po = Tensor(oo, requires_grad=False)
-        o = po[-1:, :, :].cat(po[:-1, :, :], dim=0)
-
-        x = elemmax(o, key + time_decay)
-        a = (o - x).exp()
-        b = (key + time_decay - x).exp()
-        y = (a * p + b * value) / (a * q + b)
-        y = value[:1, :, :].cat(y[1:, :, :])
-        y = y.transpose((1, 0, 2))
-        return y
+        return wkv
 
 
 class TimeMix:
@@ -156,17 +140,21 @@ class TimeMix:
         ratio_0_to_1 = i / (layers - 1)
         ratio_1_to_almost_0 = 1.0 - (i / layers)
 
-        decay_speed = np.array([0.0] * embed_size)
+        decay_speed = np.array([0.0] * embed_size, dtype=np.float32)
         for h in range(embed_size):
             decay_speed[h] = -5 + 8 * (h / (embed_size - 1)) ** (
                 0.7 + 1.3 * ratio_0_to_1
             )
-        self.time_decay = Tensor(decay_speed, requires_grad=False)
+        self.time_decay = Tensor(decay_speed)
 
-        zigzag = np.array([((i + 1) % 3 - 1) * 0.5 for i in range(embed_size)])
-        self.time_first = Tensor(np.array([math.log(0.3)] * embed_size) + zigzag)
+        zigzag = np.array(
+            [((i + 1) % 3 - 1) * 0.5 for i in range(embed_size)], dtype=np.float32
+        )
+        self.time_first = Tensor(
+            np.array([math.log(0.3)] * embed_size, dtype=np.float32) + zigzag
+        )
 
-        x = np.ones((1, 1, embed_size))
+        x = np.ones((1, 1, embed_size), dtype=np.float32)
         for i in range(embed_size):
             x[0, 0, i] = i / embed_size
         self.time_mix_k = Tensor(pow(x, ratio_1_to_almost_0))
@@ -197,8 +185,9 @@ class TimeMix:
         r = self.receptance(xr).sigmoid()
         v = self.value(xv)
 
-        B, T, C = x.shape
-        rwkv = r * self.wkv(B, T, C, self.time_decay, self.time_first, k, v)
+        _, T, C = x.shape
+        time_curve = Tensor([-(T - 2 - i) for i in range(T - 1)], requires_grad=False)
+        rwkv = r * self.wkv(T, C, self.time_decay, self.time_first, k, v, time_curve)
 
         rwkv = self.output(rwkv)
         return rwkv
@@ -237,7 +226,7 @@ class Block:
         ln2x = self.ln2(x)
         x = x + self.ffn(ln2x)
 
-        return x
+        return x.realize()
 
 
 class RWKV_GPT:
