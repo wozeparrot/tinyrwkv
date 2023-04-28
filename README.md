@@ -8,27 +8,24 @@ A port of the [RWKV-LM](https://github.com/BlinkDL/RWKV-LM) large language model
 
 Currently, requires tinygrad from git.
 
-Weights must be preprocessed.
+Run the cli with `python -m cli`
 
 ```
-Usage: python main.py [pre|gen|gra|cmp|gpt|ptr|tra]
-  pre: preprocess weights from pytorch or from training subcommand
-    `python main.py pre <.pth | .pkl> <out.pkl> <float | half>`
-  gen: generate text with the rnn mode
-    `python main.py gen <.pkl> [prompt]`
-    Run with JIT=1 OPTLOCAL=1 GPU=1 for much faster inference on gpu
-  gra: use with GRAPH=1 to generate a graph of the rnn mode
-    `GRAPH=1 python main.py gra <.pkl>`
-  cmp: attempt to compile the rnn mode to c (must use float32 weights)
-       outputs the compiled code to `out.c`
-    `python main.py cmp <.pkl>`
-  gpt: generate text with the gpt mode
-    `python main.py gpt`
-  ptr: preprocess pytorch weights into compatible format for training
-    `python main.py ptr <.pth> <out.pkl>`
-  tra: train with gpt mode
-    `python3 run.py tra <start_lr> <end_lr> <b1> <b2> <wd> <start_epoch> <epochs> <steps> <batch_size> <ctx_size> <ckpt_name>`
-```
+usage: tinyrwkv-cli [-h] [--seed SEED] {pre,gen,cmp,ptr,gpt} ...
+
+CLI for tinyrwkv
+
+positional arguments:
+  {pre,gen,cmp,ptr,gpt}
+    pre                 preprocess either tinyrwkv trained weights or pytorch trained weights into RNN form
+    gen                 freeform generation using the RNN mode (requires a preprocessed model using `pre`)
+    cmp                 compile a RNN model into c source code and a compiled executable (need to run with CLANG=1)
+    ptr                 preprocess pytorch weights weights into GPT form for training or inference
+    gpt                 freeform generation using the GPT mode (requires a preprocessed model using `ptr`)
+
+options:
+  -h, --help            show this help message and exit
+  --seed SEED           seed for random```
 
 ## License
 
