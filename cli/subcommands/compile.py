@@ -74,6 +74,7 @@ def compile(args: Namespace) -> None:
         )
 
         cprog = [
+            "#include <assert.h>",
             "#include <math.h>",
             "#include <stdio.h>",
             "#include <stdlib.h>",
@@ -261,14 +262,16 @@ int main(int argc, char *argv[]) {{
   // load embedding weights
   FILE *fe = fopen("emb.bin", "rb");
   float *emb = malloc({len(model.emb.lazydata.realized._buf)} * sizeof(float));
-  fread(emb, 1, {len(model.emb.lazydata.realized._buf)} * sizeof(float), fe);
+  int read = fread(emb, 1, {len(model.emb.lazydata.realized._buf)} * sizeof(float), fe);
+  assert(read == {len(model.emb.lazydata.realized._buf)} * sizeof(float));
   fclose(fe);
 
   fprintf(stderr, "Loading weights...\\n");
   // load weights
   FILE *fw = fopen("weights.bin", "rb");
   {model.dtype} *weight_data = malloc({weights_written});
-  fread(weight_data, 1, {weights_written}, fw);
+  read = fread(weight_data, 1, {weights_written}, fw);
+  assert(read == {weights_written});
   fclose(fw);
   init_weights(weight_data);
 
@@ -276,7 +279,8 @@ int main(int argc, char *argv[]) {{
   // load init state
   FILE *fs = fopen("state.bin", "rb");
   float *state_data = malloc({layers} * 5 * {dim} * sizeof(float));
-  fread(state_data, 1, {len(state.lazydata.realized._buf)}, fs);
+  read = fread(state_data, 1, {len(state.lazydata.realized._buf)}, fs);
+  assert(read == {len(state.lazydata.realized._buf)});
   fclose(fs);
 
   fprintf(stderr, "Loading tokenizer...\\n");
@@ -302,8 +306,8 @@ int main(int argc, char *argv[]) {{
   free(state_data);
 
   // input string from stdin
-  char input_str[1024];
-  fread(&input_str, sizeof(input_str), 1, stdin);
+  char input_str[4096];
+  read = fread(&input_str, sizeof(input_str), 1, stdin);
 
   printf("%s", input_str);
   fflush(stdout);
@@ -358,9 +362,13 @@ int main(int argc, char *argv[]) {{
                 "--release",
             ],
             cwd=os.path.join(os.path.dirname(__file__), "../../deps/tokenizers2c/"),
+            check=True,
         )
     except FileNotFoundError:
         print("cargo not found, skipping compilation")
+        return
+    except subprocess.CalledProcessError:
+        print("cargo build failed, skipping compilation")
         return
 
     try:
@@ -382,7 +390,11 @@ int main(int argc, char *argv[]) {{
                 "--rtlib=compiler-rt",
                 f'-L{os.path.join(os.path.dirname(__file__), "../../deps/tokenizers2c/target/release/")}',
             ],
+            check=True,
         )
     except FileNotFoundError:
         print("clang not found, skipping compilation")
+        return
+    except subprocess.CalledProcessError:
+        print("clang build failed, skipping compilation")
         return
