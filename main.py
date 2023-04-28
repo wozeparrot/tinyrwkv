@@ -1,6 +1,8 @@
-from model_gpt import RWKV_GPT
-from model_rnn import RWKV_RNN
-from utils import sample_logits, get_child, count_parameters
+from tinyrwkv.model_gpt import RWKV_GPT
+from tinyrwkv.model_rnn import RWKV_RNN
+from tinyrwkv.utils.sample import sample_logits
+from tinyrwkv.utils.misc import get_child
+from tinyrwkv.utils.model import count_parameters
 
 from tinygrad.nn.optim import get_parameters, get_state_dict
 from tinygrad.tensor import Tensor
@@ -96,7 +98,7 @@ if sys.argv[1] == "pre":
 
     print("Writing info...")
     info = {
-        "vocab_size": 50277,
+        "vocab_size": weights["emb.weight"].shape[0],
         "embed_size": weights["emb.weight"].shape[1],
         "layers": sum("ln1.weight" in k for k in weights.keys()),
         "dtype": sys.argv[4],
@@ -180,12 +182,12 @@ This is a test of the emergency broadcast system. This is only a test. If this h
         sampled = sample_logits(
             logits,
             alpha_counter=alpha_counter,
-            alpha_presence=0.2,
-            alpha_frequency=0.2,
-            temperature=1.0,
+            alpha_presence=0.1,
+            alpha_frequency=0.1,
+            temperature=0.63,
             top_p=0.0,
             typical_p=0.2,
-            top_k=50,
+            top_k=0,
         )
 
         last_token = sampled
@@ -249,7 +251,7 @@ elif sys.argv[1] == "cmp":
         id(the_output.lazydata.realized): "output",
     }
 
-    from utils import compile_net
+    from tinyrwkv.utils.model import compile_net
 
     with open("out.c", "w") as f:
         functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
@@ -464,7 +466,7 @@ elif sys.argv[1] == "ptr":
 elif sys.argv[1] == "tra":
     if len(sys.argv) < 13:
         print(
-            "usage: python3 run.py tra <start_lr> <end_lr> <b1> <b2> <wd> <start_epoch> <epochs> <steps> <batch_size> <ctx_size> <ckpt_name>"
+            "usage: python3 run.py tra <start_lr> <end_lr> <b1> <b2> <wd> <start_epoch> <epochs> <steps> <batch_size> <ctx_size> <embed_size> <layers> <ckpt_name>"
         )
         sys.exit(1)
 
@@ -478,35 +480,38 @@ elif sys.argv[1] == "tra":
     steps = int(sys.argv[9])
     batch_size = int(sys.argv[10])
     ctx_size = int(sys.argv[11])
-    ckpt_name = sys.argv[12]
+    embed_size = int(sys.argv[12])
+    layers = int(sys.argv[13])
+    ckpt_name = sys.argv[14]
 
     # load tokenizer
     tokenizer = Tokenizer.from_file("tokenizer.json")
 
     # load model
-    model = RWKV_GPT(ctx_size, 50277, 768, 12)
+    model = RWKV_GPT(ctx_size, 50277, embed_size, layers)
     print(f"model has ~{count_parameters(model) / 1000 / 1000}M parameters")
 
     # load weights
-    with open(f"tra_ckpts/{ckpt_name}.weights.pkl", "rb") as f:
-        weights = pickle.load(f)
+    if ckpt_name != "none":
+        with open(f"tra_ckpts/{ckpt_name}.weights.pkl", "rb") as f:
+            weights = pickle.load(f)
 
-    loaded = 0
-    skipped = 0
-    for k, v in tqdm(weights.items()):
-        try:
-            w = get_child(model, k)
-            loaded += 1
-        except:
-            w = None
-            skipped += 1
-        if w is not None:
-            assert w.shape == v.shape
-            w.assign(v)
+        loaded = 0
+        skipped = 0
+        for k, v in tqdm(weights.items()):
+            try:
+                w = get_child(model, k)
+                loaded += 1
+            except:
+                w = None
+                skipped += 1
+            if w is not None:
+                assert w.shape == v.shape
+                w.assign(v)
 
-    print(f"loaded {loaded} weights, skipped {skipped} weights")
-    del weights
-    gc.collect()
+        print(f"loaded {loaded} weights, skipped {skipped} weights")
+        del weights
+        gc.collect()
 
     from tinygrad.nn.optim import AdamW
     from tinygrad.extra.training import sparse_categorical_crossentropy
@@ -526,7 +531,7 @@ elif sys.argv[1] == "tra":
         for i in range(len(optimizer.v)):
             optimizer.v[i].assign(optimizer_state["v"][i])
 
-    # scale learning rate according to start epoch
+    # decay learning rate according to start epoch using cosine annealing
     lr_decay = (end_lr / start_lr) ** (1 / epochs)
     for i in range(start_epoch):
         optimizer.lr *= lr_decay
@@ -537,6 +542,7 @@ elif sys.argv[1] == "tra":
     print("loading training data...")
     train_data = np.load("train.npy").astype(int)
     print("done loading training data")
+    print(f"training data has {len(train_data) / 1000 / 1000}M tokens")
     gc.collect()
 
     Tensor.training = True

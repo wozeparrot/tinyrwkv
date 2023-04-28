@@ -1,4 +1,5 @@
 from tinygrad.tensor import Tensor
+from tinygrad.jit import TinyJit
 import tinygrad.nn as nn
 from tqdm import tqdm
 
@@ -6,7 +7,7 @@ import gc
 import json
 import pickle
 
-from utils import matvec, elemmax
+from utils.tensor import matvec, elemmax
 
 
 class Att:
@@ -62,10 +63,6 @@ class Att:
         a = (e1 * att_aa) + (e2 * v)
         b = (e1 * att_bb) + e2
         rwkv = r * (a / b)
-
-        # eww = ww.exp()
-        # epp = att_pp.exp()
-        # rwkv = r * ((eww * v + epp * att_aa) / (eww + epp * att_bb))
 
         # update state
         ww = att_pp + self.time_decay
@@ -284,6 +281,7 @@ class RWKV_RNN:
     def build_input(self, ctx: Tensor, state: Tensor) -> Tensor:
         return Tensor.cat(ctx, state).realize()
 
+    @TinyJit
     def forward(
         self,
         ctx: Tensor,
@@ -329,4 +327,4 @@ class RWKV_RNN:
         x = x.layernorm().linear(self.ln_out_weight, self.ln_out_bias)
         x = matvec(self.head, x)
 
-        return Tensor.cat(x, state)
+        return Tensor.cat(x, state).realize()

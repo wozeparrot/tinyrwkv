@@ -1,3 +1,8 @@
+# nix stuff
+.direnv/
+result
+
+# python stuff
 .venv/
 __pycache__/
 build/
@@ -12,5 +17,8 @@ build/
 # ignore training data
 *.npy
 
-# don't add testing tinygrad
+# don't add cloned tinygrad
 tinygrad/
+
+# ignore generated c code
+compiled/
