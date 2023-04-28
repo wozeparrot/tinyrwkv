@@ -25,7 +25,8 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
-  --seed SEED           seed for random```
+  --seed SEED           seed for random
+```
 
 ## License
 
