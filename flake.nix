@@ -31,6 +31,7 @@
             minimal.cargo
             minimal.rustc
             targets."aarch64-unknown-linux-musl".latest.rust-std
+            targets."x86_64-unknown-linux-musl".latest.rust-std
           ];
       in {
         devShell = pkgs.mkShell {
@@ -66,6 +67,7 @@
               (python3.withPackages python-packages)
               rust-toolchain
               llvmPackages.clang
+              llvmPackages.libunwind
 
               # needed for GRAPH=1 to work
               graphviz
