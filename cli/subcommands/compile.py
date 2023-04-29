@@ -40,7 +40,6 @@ def compile(args: Namespace) -> None:
 
     # load model
     model = RWKV_RNN(args.model_path)
-
     assert model.dtype == "float", "only float supported for now"
 
     # run model twice to initialize the jit
@@ -80,6 +79,10 @@ def compile(args: Namespace) -> None:
             "#include <stdlib.h>",
             "#include <string.h>",
             "#include <time.h>",
+            "#include <sys/mman.h>",
+            "#include <sys/stat.h>",
+            "#include <sys/types.h>",
+            "#include <fcntl.h>",
             '#include "tokenizers.h"',
             "#define max(x,y) ((x>y)?x:y)",
             "#define half __fp16",
@@ -259,29 +262,29 @@ int main(int argc, char *argv[]) {{
   srand(time(NULL));
 
   fprintf(stderr, "Loading embedding weights...\\n");
-  // load embedding weights
-  FILE *fe = fopen("emb.bin", "rb");
-  float *emb = malloc({len(model.emb.lazydata.realized._buf)} * sizeof(float));
-  int read = fread(emb, 1, {len(model.emb.lazydata.realized._buf)} * sizeof(float), fe);
-  assert(read == {len(model.emb.lazydata.realized._buf)} * sizeof(float));
-  fclose(fe);
+  // load embedding weights using mmap
+  int fe = open("emb.bin", O_RDONLY);
+  struct stat fesb;
+  fstat(fe, &fesb);
+  float *emb = mmap(NULL, fesb.st_size, PROT_READ, MAP_SHARED, fe, 0);
+  assert(emb != MAP_FAILED);
 
   fprintf(stderr, "Loading weights...\\n");
-  // load weights
-  FILE *fw = fopen("weights.bin", "rb");
-  {model.dtype} *weight_data = malloc({weights_written});
-  read = fread(weight_data, 1, {weights_written}, fw);
-  assert(read == {weights_written});
-  fclose(fw);
+  // load weights using mmap
+  int fw = open("weights.bin", O_RDONLY);
+  struct stat fwsb;
+  fstat(fw, &fwsb);
+  {model.dtype} *weight_data = mmap(NULL, fwsb.st_size, PROT_READ, MAP_SHARED, fw, 0);
+  assert(weight_data != MAP_FAILED);
   init_weights(weight_data);
 
   fprintf(stderr, "Loading initial state...\\n");
-  // load init state
-  FILE *fs = fopen("state.bin", "rb");
-  float *state_data = malloc({layers} * 5 * {dim} * sizeof(float));
-  read = fread(state_data, 1, {len(state.lazydata.realized._buf)}, fs);
-  assert(read == {len(state.lazydata.realized._buf)});
-  fclose(fs);
+  // load init state using mmap
+  int fs = open("state.bin", O_RDONLY);
+  struct stat fssb;
+  fstat(fs, &fssb);
+  float *state_data = mmap(NULL, fssb.st_size, PROT_READ, MAP_SHARED, fs, 0);
+  assert(state_data != MAP_FAILED);
 
   fprintf(stderr, "Loading tokenizer...\\n");
   // setup tokenizer
@@ -303,11 +306,10 @@ int main(int argc, char *argv[]) {{
   // setup input
   float *input = malloc(sizeof(float) * ({dim} + {layers} * 5 * {dim}));
   memcpy(input + {dim}, state_data, sizeof(float) * {layers} * 5 * {dim});
-  free(state_data);
 
   // input string from stdin
   char input_str[4096];
-  read = fread(&input_str, sizeof(input_str), 1, stdin);
+  int read = fread(&input_str, sizeof(input_str), 1, stdin);
 
   printf("%s", input_str);
   fflush(stdout);
@@ -334,7 +336,7 @@ int main(int argc, char *argv[]) {{
 
     // -- sampling --
     last_token = sample(output, 0.85, 0.95);
-    if (last_token == 0) break;
+    if (last_token == 0 && argc < 4) break;
 
     char *decoded = tk_decode(tokenizer, &last_token, 1);
     printf("%s", decoded);
@@ -344,8 +346,6 @@ int main(int argc, char *argv[]) {{
 
   // cleanup
   free(input);
-  free(weight_data);
-  free(emb);
   tk_free(tokenizer);
 }}
 """,
@@ -389,6 +389,7 @@ int main(int argc, char *argv[]) {{
                 "-lunwind",
                 "--rtlib=compiler-rt",
                 f'-L{os.path.join(os.path.dirname(__file__), "../../deps/tokenizers2c/target/release/")}',
+                "-s",
             ],
             check=True,
         )
