@@ -222,42 +222,41 @@ class RWKV_RNN:
 
         with open(path, "rb") as f:
             weights = pickle.load(f)
-        tg_weights = {}
         for k, v in tqdm(weights.items()):
-            tg_weights[k] = Tensor(v)
+            weights[k] = Tensor(v)
 
-        self.emb = tg_weights["emb.weight"]
+        self.emb = weights["emb.weight"]
 
         self.blocks = []
         for i in range(self.layers):
             self.blocks.append(
                 Block(
                     self.embed_size,
-                    tg_weights[f"blocks.{i}.ln1.weight"],
-                    tg_weights[f"blocks.{i}.ln1.bias"],
-                    tg_weights[f"blocks.{i}.att.time_mix_k"],
-                    tg_weights[f"blocks.{i}.att.time_mix_v"],
-                    tg_weights[f"blocks.{i}.att.time_mix_r"],
-                    tg_weights[f"blocks.{i}.att.key.weight"],
-                    tg_weights[f"blocks.{i}.att.value.weight"],
-                    tg_weights[f"blocks.{i}.att.receptance.weight"],
-                    tg_weights[f"blocks.{i}.att.time_first"],
-                    tg_weights[f"blocks.{i}.att.time_decay"],
-                    tg_weights[f"blocks.{i}.att.output.weight"],
-                    tg_weights[f"blocks.{i}.ln2.weight"],
-                    tg_weights[f"blocks.{i}.ln2.bias"],
-                    tg_weights[f"blocks.{i}.ffn.time_mix_k"],
-                    tg_weights[f"blocks.{i}.ffn.time_mix_r"],
-                    tg_weights[f"blocks.{i}.ffn.key.weight"],
-                    tg_weights[f"blocks.{i}.ffn.value.weight"],
-                    tg_weights[f"blocks.{i}.ffn.receptance.weight"],
+                    weights[f"blocks.{i}.ln1.weight"],
+                    weights[f"blocks.{i}.ln1.bias"],
+                    weights[f"blocks.{i}.att.time_mix_k"],
+                    weights[f"blocks.{i}.att.time_mix_v"],
+                    weights[f"blocks.{i}.att.time_mix_r"],
+                    weights[f"blocks.{i}.att.key.weight"],
+                    weights[f"blocks.{i}.att.value.weight"],
+                    weights[f"blocks.{i}.att.receptance.weight"],
+                    weights[f"blocks.{i}.att.time_first"],
+                    weights[f"blocks.{i}.att.time_decay"],
+                    weights[f"blocks.{i}.att.output.weight"],
+                    weights[f"blocks.{i}.ln2.weight"],
+                    weights[f"blocks.{i}.ln2.bias"],
+                    weights[f"blocks.{i}.ffn.time_mix_k"],
+                    weights[f"blocks.{i}.ffn.time_mix_r"],
+                    weights[f"blocks.{i}.ffn.key.weight"],
+                    weights[f"blocks.{i}.ffn.value.weight"],
+                    weights[f"blocks.{i}.ffn.receptance.weight"],
                 )
             )
 
-        self.ln_out_weight = tg_weights["ln_out.weight"]
-        self.ln_out_bias = tg_weights["ln_out.bias"]
+        self.ln_out_weight = weights["ln_out.weight"]
+        self.ln_out_bias = weights["ln_out.bias"]
 
-        self.head = tg_weights["head.weight"]
+        self.head = weights["head.weight"]
 
         gc.collect()
 
