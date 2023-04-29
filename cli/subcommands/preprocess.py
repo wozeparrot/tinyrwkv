@@ -32,7 +32,7 @@ def preprocess(args: Namespace) -> None:
     if args.input_path.endswith(".pth"):
         import torch
 
-        weights = torch.load(args.input_path, map_location="cpu", weights_only=True)
+        weights = torch.load(args.input_path, map_location="cpu")
     elif args.input_path.endswith(".pkl"):
         with open(args.input_path, "rb") as f:
             weights = pickle.load(f)
@@ -43,21 +43,21 @@ def preprocess(args: Namespace) -> None:
     for k, v in tqdm(weights.items()):
         if args.dtype == "half" and "emb" not in k and "blocks.0.ln0" not in k:
             if isinstance(v, np.ndarray):
-                weights[k] = v.astype(np.float16)
+                v = v.astype(np.float16)
             else:
-                weights[k] = v.half().numpy()
+                v = v.half().numpy()
         else:
             if isinstance(v, np.ndarray):
-                weights[k] = v.astype(np.float32)
+                v = v.astype(np.float32)
             else:
-                weights[k] = v.float().numpy()
+                v = v.float().numpy()
 
         if ".time_" in k:
-            weights[k] = weights[k].squeeze()
+            v = v.squeeze()
         if ".time_decay" in k:
-            weights[k] = -np.exp(weights[k])
+            v = -np.exp(v)
 
-        del v
+        weights[k] = v
 
     # precompute ln0 with emb.weight
     print("Precomputing emb.weight with ln0...")
