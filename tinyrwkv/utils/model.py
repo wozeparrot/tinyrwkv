@@ -6,12 +6,13 @@ def compile_net(run, special_names):
     functions = {}
     bufs = {}
     bufnum = 0
+    offset = 0
+    buf_offsets = {}
     statements = []
     bufs_to_save = {}
     for fxn, args in run.jit_cache:
-        functions[
-            fxn.name
-        ] = fxn.prg  # NOTE: this assumes all with the same name are the same
+        functions[fxn.name] = fxn.prg
+
         cargs = []
         for i, arg in enumerate(args):
             key = id(arg)
@@ -19,13 +20,22 @@ def compile_net(run, special_names):
                 if key in special_names:
                     bufs[key] = (special_names[key], len(arg._buf), arg.dtype)
                 else:
-                    bufs[key] = (f"buf_{bufnum}", len(arg._buf), arg.dtype)
+                    bufs[key] = (f"scratch_{bufnum}", len(arg._buf), arg.dtype)
                     bufnum += 1
                     if i > 0:
-                        bufs_to_save[
-                            bufs[key][0]
-                        ] = arg  # if first usage of a buffer is not an output, and it's not a special name
-            cargs.append(bufs[key][0])
+                        bufs_to_save[bufs[key][0]] = arg
+
+                        # offset into weights
+                        if key not in buf_offsets:
+                            buf_offsets[key] = offset
+                            offset += len(arg._buf)
+
+            # use offset into weights
+            if key in special_names or bufs[key][0] not in bufs_to_save:
+                cargs.append(bufs[key][0])
+            else:
+                cargs.append(f"weights + {buf_offsets[key]}")
+
         statements.append(f"{fxn.name}({', '.join(cargs)});")
 
     return functions, statements, bufs, bufs_to_save

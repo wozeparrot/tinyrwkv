@@ -1,3 +1,5 @@
+#pragma once
+
 void *tk_from_file(const char *file);
 
 void tk_free(void *tokenizer);
