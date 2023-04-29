@@ -1,7 +1,5 @@
 # tinyrwkv: A tinier port of RWKV-LM
 
-[![Build Status](https://travis-ci.com/BlinkDL/tinyrwkv.svg?branch=master)](https://travis-ci.com/BlinkDL/tinyrwkv)
-
 A port of the [RWKV-LM](https://github.com/BlinkDL/RWKV-LM) large language model to the [tinygrad](https://tinygrad.org/) framework.
 
 ## Usage
