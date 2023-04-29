@@ -60,6 +60,9 @@ def generate(args: Namespace) -> None:
 
     # load model
     model = RWKV_RNN(args.model_path)
+    assert (
+        model.vocab_size == tokenizer.get_vocab_size()
+    ), "vocab size mismatch (are you using the correct tokenizer?)"
 
     # encode initial context
     initial_context = (
