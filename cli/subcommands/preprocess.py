@@ -3,6 +3,7 @@ from tqdm import tqdm
 import numpy as np
 
 import json
+import gc
 import pickle
 from argparse import Namespace, _SubParsersAction, ArgumentParser
 
@@ -31,7 +32,7 @@ def preprocess(args: Namespace) -> None:
     if args.input_path.endswith(".pth"):
         import torch
 
-        weights = torch.load(args.input_path, map_location="cpu")
+        weights = torch.load(args.input_path, map_location="cpu", weights_only=True)
     elif args.input_path.endswith(".pkl"):
         with open(args.input_path, "rb") as f:
             weights = pickle.load(f)
@@ -42,21 +43,21 @@ def preprocess(args: Namespace) -> None:
     for k, v in tqdm(weights.items()):
         if args.dtype == "half" and "emb" not in k and "blocks.0.ln0" not in k:
             if isinstance(v, np.ndarray):
-                v = v.astype(np.float16)
+                weights[k] = v.astype(np.float16)
             else:
-                v = v.half().numpy()
+                weights[k] = v.half().numpy()
         else:
             if isinstance(v, np.ndarray):
-                v = v.astype(np.float32)
+                weights[k] = v.astype(np.float32)
             else:
-                v = v.float().numpy()
+                weights[k] = v.float().numpy()
 
         if ".time_" in k:
-            v = v.squeeze()
+            weights[k] = weights[k].squeeze()
         if ".time_decay" in k:
-            v = -np.exp(v)
+            weights[k] = -np.exp(weights[k])
 
-        weights[k] = v
+        del v
 
     # precompute ln0 with emb.weight
     print("Precomputing emb.weight with ln0...")
