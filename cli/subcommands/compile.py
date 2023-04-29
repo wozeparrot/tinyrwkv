@@ -158,10 +158,10 @@ def compile(args: Namespace) -> None:
         subprocess.run(
             [
                 "clang",
-                os.path.join(args.output_path, "main.c"),
+                "main.c",
                 f'-I{os.path.join(os.path.dirname(__file__), "../../deps/tokenizers2c/")}',
                 "-o",
-                os.path.join(args.output_path, "tinyrwkv"),
+                "tinyrwkv",
                 "-Ofast",
                 "-ffast-math",
                 "-march=native",
@@ -174,6 +174,7 @@ def compile(args: Namespace) -> None:
                 f'-L{os.path.join(os.path.dirname(__file__), "../../deps/tokenizers2c/target/release/")}',
                 "-s",
             ],
+            cwd=args.output_path,
             check=True,
         )
     except FileNotFoundError:
