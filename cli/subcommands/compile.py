@@ -40,7 +40,6 @@ def compile(args: Namespace) -> None:
 
     # load model
     model = RWKV_RNN(args.model_path)
-    assert model.dtype == "float", "only float supported for now"
 
     # run model twice to initialize the jit
     embed = Tensor(model.index_embed(0).numpy())
@@ -82,18 +81,21 @@ def compile(args: Namespace) -> None:
         )
 
         f.write(
-            header.replace("#define TINYRWKV_DIM 0", "").replace(
-                "#define TINYRWKV_LAYERS 0", ""
+            header.replace(
+                "#define TINYRWKV_DIM 0", f"#define TINYRWKV_DIM {model.embed_size}"
+            )
+            .replace(
+                "#define TINYRWKV_LAYERS 0", f"#define TINYRWKV_LAYERS {model.layers}"
+            )
+            .replace(
+                "#define TINYRWKV_DTYPE float", f"#define TINYRWKV_DTYPE {model.dtype}"
             )
             + "\n"
         )
 
         cprog = [
-            f"#define TINYRWKV_DIM {model.embed_size}",
-            f"#define TINYRWKV_LAYERS {model.layers}",
             "#include <math.h>",
             "#define max(x,y) ((x>y)?x:y)",
-            "#define half __fp16",
         ]
         f.write("\n".join(cprog) + "\n")
 
@@ -125,7 +127,7 @@ def compile(args: Namespace) -> None:
 
         cprog = (
             [
-                "void tinyrwkv_infer(float *input, float *output, float *weights) {",
+                "void tinyrwkv_infer(float *input, float *output, TINYRWKV_DTYPE *weights) {",
             ]
             + scratch_buffers
             + statements

@@ -148,7 +148,8 @@ int main(int argc, char *argv[]) {
   int fw = open("weights.bin", O_RDONLY);
   struct stat fwsb;
   fstat(fw, &fwsb);
-  float *weight_data = mmap(NULL, fwsb.st_size, PROT_READ, MAP_SHARED, fw, 0);
+  TINYRWKV_DTYPE *weight_data =
+      mmap(NULL, fwsb.st_size, PROT_READ, MAP_SHARED, fw, 0);
   assert(weight_data != MAP_FAILED);
 
   fprintf(stderr, "Loading initial state...\n");
