@@ -3,6 +3,7 @@
 #include "sys/stat.h"
 #include <assert.h>
 #include <math.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,12 +23,16 @@ int compare_index_value(const void *a, const void *b) {
   return (int)(100.f * (ib->value - ia->value));
 }
 
-int sample(float *logits, float temperature, float tau) {
+int sample(float *logits, float temperature, float tau, bool ignore_eof) {
   // try to bypass nan
   for (unsigned int i = 0; i < 50277; i++) {
     if (logits[i] != logits[i]) {
       logits[i] = 0;
     }
+  }
+
+  if (ignore_eof) {
+    logits[0] = -INFINITY;
   }
 
   if (temperature == 0) {
@@ -214,8 +219,8 @@ int main(int argc, char *argv[]) {
     memcpy(input + TINYRWKV_DIM, output + TINYRWKV_VOCAB, TINYRWKV_STATE_SIZE);
 
     // -- sampling --
-    last_token = sample(output, temperature, tau);
-    if (last_token == 0 && argc < 4)
+    last_token = sample(output, temperature, tau, argc > 3);
+    if (last_token == 0)
       break;
 
     char *decoded = tk_decode(tokenizer, &last_token, 1);
