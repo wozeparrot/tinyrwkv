@@ -148,17 +148,19 @@ int main(int argc, char *argv[]) {
   int fw = open("weights.bin", O_RDONLY);
   struct stat fwsb;
   fstat(fw, &fwsb);
-  TINYRWKV_DTYPE *weight_data =
+  TINYRWKV_DTYPE *weights =
       mmap(NULL, fwsb.st_size, PROT_READ, MAP_SHARED, fw, 0);
-  assert(weight_data != MAP_FAILED);
+  assert(weights != MAP_FAILED);
 
   fprintf(stderr, "Loading initial state...\n");
   // load init state using mmap
   int fs = open("state.bin", O_RDONLY);
   struct stat fssb;
   fstat(fs, &fssb);
-  float *state_data = mmap(NULL, fssb.st_size, PROT_READ, MAP_SHARED, fs, 0);
-  assert(state_data != MAP_FAILED);
+  float *init_state = mmap(NULL, fssb.st_size, PROT_READ, MAP_SHARED, fs, 0);
+  assert(init_state != MAP_FAILED);
+
+  tinyrwkv_t *tinyrwkv = tinyrwkv_init(emb, weights);
 
   fprintf(stderr, "Loading tokenizer...\n");
   // setup tokenizer
@@ -178,14 +180,11 @@ int main(int argc, char *argv[]) {
   fprintf(stderr, "Using temperature: %f, tau: %f\n", temperature, tau);
 
   // setup input
-  float *input = malloc(sizeof(float) *
-                        (TINYRWKV_DIM + TINYRWKV_LAYERS * 5 * TINYRWKV_DIM));
-  memcpy(input + TINYRWKV_DIM, state_data,
-         sizeof(float) * TINYRWKV_LAYERS * 5 * TINYRWKV_DIM);
+  float *input = malloc(TINYRWKV_INPUT_SIZE);
+  memcpy(input + TINYRWKV_DIM, init_state, TINYRWKV_STATE_SIZE);
 
   // setup output
-  float *output = malloc(sizeof(float) * 50277 +
-                         sizeof(float) * TINYRWKV_LAYERS * 5 * TINYRWKV_DIM);
+  float *output = malloc(TINYRWKV_OUTPUT_SIZE);
 
   // input string from stdin
   char input_str[4096];
@@ -200,11 +199,9 @@ int main(int argc, char *argv[]) {
 
   // preprocess input by running it through the model
   for (int i = 0; i < tokenized_len - 1; i++) {
-    memcpy(input, emb + (input_tokens[i] * TINYRWKV_DIM),
-           sizeof(float) * TINYRWKV_DIM);
-    tinyrwkv_infer(input, output, weight_data);
-    memcpy(input + TINYRWKV_DIM, output + 50277,
-           sizeof(float) * TINYRWKV_LAYERS * 5 * TINYRWKV_DIM);
+    tinyrwkv_index_embed(tinyrwkv, input_tokens[i], input);
+    tinyrwkv_infer(tinyrwkv, input, output);
+    memcpy(input + TINYRWKV_DIM, output + TINYRWKV_VOCAB, TINYRWKV_STATE_SIZE);
   }
   free(input_tokens);
 
@@ -212,11 +209,9 @@ int main(int argc, char *argv[]) {
 
   // run model
   while (1) {
-    memcpy(input, emb + (last_token * TINYRWKV_DIM),
-           sizeof(float) * TINYRWKV_DIM);
-    tinyrwkv_infer(input, output, weight_data);
-    memcpy(input + TINYRWKV_DIM, output + 50277,
-           sizeof(float) * TINYRWKV_LAYERS * 5 * TINYRWKV_DIM);
+    tinyrwkv_index_embed(tinyrwkv, last_token, input);
+    tinyrwkv_infer(tinyrwkv, input, output);
+    memcpy(input + TINYRWKV_DIM, output + TINYRWKV_VOCAB, TINYRWKV_STATE_SIZE);
 
     // -- sampling --
     last_token = sample(output, temperature, tau);
@@ -233,4 +228,5 @@ int main(int argc, char *argv[]) {
   free(input);
   free(output);
   tk_free(tokenizer);
+  tinyrwkv_free(tinyrwkv);
 }

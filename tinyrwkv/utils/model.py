@@ -34,7 +34,7 @@ def compile_net(run, special_names):
             if key in special_names or bufs[key][0] not in bufs_to_save:
                 cargs.append(bufs[key][0])
             else:
-                cargs.append(f"weights + {buf_offsets[key]}")
+                cargs.append(f"tinyrwkv->weights + {buf_offsets[key]}")
 
         statements.append(f"{fxn.name}({', '.join(cargs)});")
 

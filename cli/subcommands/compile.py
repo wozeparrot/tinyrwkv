@@ -82,6 +82,9 @@ def compile(args: Namespace) -> None:
 
         f.write(
             header.replace(
+                "#define TINYRWKV_VOCAB 0", f"#define TINYRWKV_VOCAB {model.vocab_size}"
+            )
+            .replace(
                 "#define TINYRWKV_DIM 0", f"#define TINYRWKV_DIM {model.embed_size}"
             )
             .replace(
@@ -127,7 +130,7 @@ def compile(args: Namespace) -> None:
 
         cprog = (
             [
-                "void tinyrwkv_infer(float *input, float *output, TINYRWKV_DTYPE *weights) {",
+                "void tinyrwkv_infer(tinyrwkv_t *tinyrwkv, float *input, float *output) {",
             ]
             + scratch_buffers
             + statements
