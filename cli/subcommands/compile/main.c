@@ -218,7 +218,7 @@ int main(int argc, char *argv[]) {
            sizeof(float) * TINYRWKV_LAYERS * 5 * TINYRWKV_DIM);
 
     // -- sampling --
-    last_token = sample(output, 0.85, 0.95);
+    last_token = sample(output, temperature, tau);
     if (last_token == 0 && argc < 4)
       break;
 
