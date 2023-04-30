@@ -149,7 +149,7 @@ def train(args: Namespace) -> None:
         wandb.init(project=args.wandb_project)
         wandb.config.update(args)
 
-    warming_up = True
+    warming_up = True if args.start_epoch == 0 else False
     tokens_processed = 0
     optimizer.zero_grad()
     for epoch in range(args.start_epoch, args.epochs):
