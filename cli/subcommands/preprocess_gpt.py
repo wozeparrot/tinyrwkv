@@ -24,7 +24,6 @@ def preprocess(args: Namespace) -> None:
     weights = torch.load(args.input_path, map_location="cpu")
 
     # convert to tinygrad
-    weights = {}
     for k, v in tqdm(weights.items()):
         weights[k] = v.float().numpy()
 

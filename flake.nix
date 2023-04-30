@@ -60,6 +60,7 @@
                 tokenizers
                 torch
                 tqdm
+                wandb
               ];
             llvmPackages = pkgs.llvmPackages_latest;
           in

@@ -1,10 +1,15 @@
 from tinygrad.jit import TinyJit
 from tinygrad.tensor import Tensor
+from tqdm import tqdm
 from typing import Callable, Union, cast
 import numpy as np
 import tinygrad.nn as nn
 
+import json
 import math
+import pickle
+
+from utils.misc import get_child
 
 
 class Embedding:
@@ -238,6 +243,7 @@ class RWKV_GPT:
     ctx_size: int
     vocab_size: int
     embed_size: int
+    dtype: str
 
     emb: Embedding
 
@@ -246,19 +252,42 @@ class RWKV_GPT:
     ln_out: nn.LayerNorm
     head: nn.Linear
 
-    def __init__(self, ctx_size: int, vocab_size: int, embed_size: int, layers: int):
+    def __init__(self, path: str, ctx_size: int):
         self.ctx_size = ctx_size
-        self.vocab_size = vocab_size
-        self.embed_size = embed_size
 
-        self.emb = Embedding(vocab_size, embed_size)
+        # load info file
+        with open(path + ".json", "r") as f:
+            info = json.load(f)
+
+        self.vocab_size = info["vocab_size"]
+        self.embed_size = info["embed_size"]
+        self.layers = info["layers"]
+        self.dtype = info["dtype"]
+
+        # setup model
+        self.emb = Embedding(self.vocab_size, self.embed_size)
 
         self.blocks = []
-        for i in range(layers):
-            self.blocks.append(Block(i, ctx_size, embed_size, layers))
+        for i in range(self.layers):
+            self.blocks.append(Block(i, self.ctx_size, self.embed_size, self.layers))
 
-        self.ln_out = nn.LayerNorm(embed_size)
-        self.head = nn.Linear(embed_size, vocab_size, bias=False)
+        self.ln_out = nn.LayerNorm(self.embed_size)
+        self.head = nn.Linear(self.embed_size, self.vocab_size, bias=False)
+
+        # load weights
+        with open(path, "rb") as f:
+            weights = pickle.load(f)
+
+            for k, v in tqdm(weights.items()):
+                try:
+                    w = cast(Tensor, get_child(self, k))
+                except:
+                    w = None
+                if w is not None:
+                    assert w.shape == v.shape
+                    w.assign(v)
+
+            del weights
 
     def forward(self, idx: Tensor) -> Tensor:
         x = self.emb(idx)

@@ -22,3 +22,6 @@ tinygrad/
 
 # ignore generated c code
 compiled/
+
+# wandb
+wandb

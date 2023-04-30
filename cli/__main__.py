@@ -1,10 +1,18 @@
 """Main CLI entry point"""
 
+from tinygrad.tensor import Tensor
 import numpy as np
 
 import argparse
 
-from .subcommands import preprocess, generate, compile, preprocess_gpt, generate_gpt
+from .subcommands import (
+    preprocess,
+    generate,
+    compile,
+    preprocess_gpt,
+    generate_gpt,
+    train,
+)
 
 
 def main() -> None:
@@ -30,8 +38,12 @@ def main() -> None:
     # generate gpt subcommand
     generate_gpt.generate_parser(subparsers)
 
+    # train subcommand
+    train.generate_parser(subparsers)
+
     args = parser.parse_args()
     np.random.seed(args.seed)
+    Tensor.manual_seed(args.seed)
 
     args.func(args)
 
