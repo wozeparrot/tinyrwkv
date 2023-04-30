@@ -43,11 +43,11 @@
                 src = inputs.tinygrad;
                 doCheck = false;
                 propagatedBuildInputs = with p; [
-                  numpy
-                  requests
-                  pillow
-                  tqdm
                   networkx
+                  numpy
+                  pillow
+                  requests
+                  tqdm
                 ];
               };
             in
