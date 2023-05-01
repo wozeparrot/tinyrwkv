@@ -150,7 +150,11 @@ def train(args: Namespace) -> None:
     optimizer.lr = args.end_lr + 0.5 * (args.start_lr - args.end_lr) * (
         1
         + math.cos(
-            ((args.start_epoch * args.steps) / (args.epochs * args.steps)) * math.pi
+            (
+                ((args.start_epoch * args.steps) - args.warmup_steps)
+                / ((args.epochs * args.steps) - args.warmup_steps)
+            )
+            * math.pi
         )
     )
 
@@ -183,7 +187,10 @@ def train(args: Namespace) -> None:
                 optimizer.lr = args.end_lr + 0.5 * (args.start_lr - args.end_lr) * (
                     1
                     + math.cos(
-                        ((step + (epoch * args.steps)) / (args.epochs * args.steps))
+                        (
+                            (step + ((epoch * args.steps) - args.warmup_steps))
+                            / ((args.epochs * args.steps) - args.warmup_steps)
+                        )
                         * math.pi
                     )
                 )
@@ -242,7 +249,9 @@ def train(args: Namespace) -> None:
             optimizer.zero_grad()
 
             # keep track of some stats
-            tokens_processed += args.batch_size * model.ctx_size
+            tokens_processed += (
+                args.batch_size * model.ctx_size * args.gradient_accumulation
+            )
 
             # wandb logging
             if args.wandb:
