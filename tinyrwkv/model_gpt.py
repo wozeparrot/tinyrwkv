@@ -1,4 +1,3 @@
-from tinygrad.jit import TinyJit
 from tinygrad.tensor import Tensor
 from tqdm import tqdm
 from typing import Callable, Union, cast
@@ -96,7 +95,7 @@ class WKV:
         key: Tensor,
         value: Tensor,
     ) -> Tensor:
-        ek = key.clip(-60, 60).transpose(1, 2).exp()
+        ek = key.transpose(1, 2).exp()
         ekv = ek * value.transpose(1, 2)
 
         time_w = (
