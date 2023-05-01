@@ -95,7 +95,7 @@ class WKV:
         key: Tensor,
         value: Tensor,
     ) -> Tensor:
-        ek = key.transpose(1, 2).exp()
+        ek = key.clip(-60, 60).transpose(1, 2).exp()
         ekv = ek * value.transpose(1, 2)
 
         time_w = (
