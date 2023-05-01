@@ -1,10 +1,11 @@
-from tinygrad.nn.optim import AdamW, get_parameters, get_state_dict
+from tinygrad.nn.optim import Optimizer, AdamW, get_parameters, get_state_dict
 from tinygrad.tensor import Tensor
 from tokenizers import Tokenizer
 from tqdm import trange
 import numpy as np
 
 from argparse import Namespace, _SubParsersAction, ArgumentParser
+from typing import cast
 import gc
 import math
 import os
@@ -64,7 +65,7 @@ def generate_parser(subparsers: "_SubParsersAction[ArgumentParser]") -> None:
     )
     parser.add_argument(
         "--optimizer",
-        help="optimizer to use (adamw only for now)",
+        help="optimizer to use (adamw or lion)",
         type=str,
         default="adamw",
     )
@@ -72,6 +73,11 @@ def generate_parser(subparsers: "_SubParsersAction[ArgumentParser]") -> None:
     parser.add_argument("--adam_b2", help="beta2 for AdamW", type=float, default=0.999)
     parser.add_argument(
         "--adam_wd", help="weight decay for AdamW", type=float, default=0.01
+    )
+    parser.add_argument("--lion_b1", help="beta1 for Lion", type=float, default=0.9)
+    parser.add_argument("--lion_b2", help="beta2 for Lion", type=float, default=0.99)
+    parser.add_argument(
+        "--lion_wd", help="weight decay for Lion", type=float, default=0.0
     )
 
     # wandb
@@ -122,8 +128,22 @@ def train(args: Namespace) -> None:
                     optimizer.m[i].assign(optimizer_state["m"][i])
                 for i in range(len(optimizer.v)):
                     optimizer.v[i].assign(optimizer_state["v"][i])
+    elif args.optimizer == "lion":
+        optimizer = Lion(
+            params, lr=args.start_lr, b1=args.lion_b1, b2=args.lion_b2, wd=args.lion_wd
+        )
+
+        # load checkpointed optimizer state if it exists
+        if args.resume_path is not None:
+            if os.path.exists("optimizer-" + args.resume_path):
+                with open("optimizer-" + args.resume_path, "rb") as f:
+                    optimizer_state = pickle.load(f)
+
+                for i in range(len(optimizer.ea)):
+                    optimizer.ea[i].assign(optimizer_state["m"][i])
+
     else:
-        raise NotImplementedError("TODO: implement other optimizers")
+        raise NotImplementedError(f"unknown optimizer {args.optimizer}")
     gc.collect()
 
     # decay learning rate
@@ -251,15 +271,24 @@ def train(args: Namespace) -> None:
         with open(
             os.path.join(args.checkpoint_path, f"optimizer-epoch_{epoch + 1}.pkl"), "wb"
         ) as f:
-            t = optimizer.t.numpy()
-            m = []
-            for tensor in optimizer.m:
-                m.append(tensor.numpy())
-            v = []
-            for tensor in optimizer.v:
-                v.append(tensor.numpy())
+            if args.optimizer == "adamw":
+                optimizer = cast(AdamW, optimizer)
+                t = optimizer.t.numpy()
+                m = []
+                for tensor in optimizer.m:
+                    m.append(tensor.numpy())
+                v = []
+                for tensor in optimizer.v:
+                    v.append(tensor.numpy())
 
-            pickle.dump({"t": t, "m": m, "v": v}, f)
+                pickle.dump({"t": t, "m": m, "v": v}, f)
+            elif args.optimizer == "lion":
+                optimizer = cast(Lion, optimizer)
+                ea = []
+                for tensor in optimizer.ea:
+                    ea.append(tensor.numpy())
+
+                pickle.dump({"ea": ea}, f)
 
 
 def sparse_categorical_crossentropy(out, Y):
@@ -270,3 +299,31 @@ def sparse_categorical_crossentropy(out, Y):
     y = y.reshape(list(Y.shape) + [channels])
     y = Tensor(y)
     return out.mul(y).mean()
+
+
+class Lion(Optimizer):
+    def __init__(
+        self,
+        params: list[Tensor],
+        lr: float = 1e-4,
+        b1: float = 0.9,
+        b2: float = 0.999,
+        wd: float = 0.0,
+    ):
+        super().__init__(params)
+        self.lr, self.b1, self.b2, self.wd = lr, b1, b2, wd
+
+        self.ea = [
+            Tensor.zeros(*t.shape, device=t.device, requires_grad=False)
+            for t in self.params
+        ]
+
+    def step(self):
+        for i, t in enumerate(self.params):
+            assert t.grad is not None
+            g = t.grad.realize()
+
+            update = self.ea[i] * self.b1 + g * (1 - self.b1)
+            self.ea[i].assign(self.ea[i] * self.b2 + g * (1 - self.b2))
+            t.assign(t.detach() + update.sign() * -self.lr)
+        self.realize(self.ea)
