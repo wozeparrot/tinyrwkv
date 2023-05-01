@@ -62,29 +62,11 @@ def generate_gpt(args: Namespace) -> None:
     tokenizer = Tokenizer.from_file(args.tokenizer_path)
 
     # load model
-    model = RWKV_GPT(1024, 50277, 768, 12)
+    model = RWKV_GPT(args.model_path, 1024)
     print(f"model has ~{count_parameters(model) / 1000 / 1000}M parameters")
-
-    # load weights
-    with open(args.model_path, "rb") as f:
-        weights = pickle.load(f)
-
-    loaded = 0
-    skipped = 0
-    for k, v in tqdm(weights.items()):
-        try:
-            w = get_child(model, k)
-            loaded += 1
-        except:
-            w = None
-            skipped += 1
-        if w is not None:
-            if "time_curve" not in k:
-                assert w.shape == v.shape
-                w.assign(v)
-
-    print(f"loaded {loaded} weights, skipped {skipped} weights")
-    del weights
+    assert (
+        model.vocab_size == tokenizer.get_vocab_size()
+    ), "vocab size mismatch (are you using the correct tokenizer?)"
 
     # encode initial context
     initial_context = (
@@ -97,7 +79,8 @@ def generate_gpt(args: Namespace) -> None:
 
     alpha_counter = np.zeros(50277)
     while True:
-        out = model.forward(Tensor([ctx]))
+        the_input = Tensor([ctx]).realize()
+        out = model.forward(the_input)
         logits = out.cpu().numpy()[-1][-1]
 
         # sample
