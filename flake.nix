@@ -55,6 +55,7 @@
                 llvmlite
                 mypy
                 numpy
+                pydot
                 pyopencl
                 tinygrad
                 tokenizers
