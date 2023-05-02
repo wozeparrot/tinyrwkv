@@ -7,6 +7,7 @@ import numpy as np
 from argparse import Namespace, _SubParsersAction, ArgumentParser
 from typing import cast
 import gc
+import json
 import math
 import os
 import pickle
@@ -298,6 +299,19 @@ def train(args: Namespace) -> None:
                     ea.append(tensor.numpy())
 
                 pickle.dump({"ea": ea}, f)
+
+        # save info json
+        print("Saving info...")
+        info = {
+            "vocab_size": model.vocab_size,
+            "embed_size": model.embed_size,
+            "layers": model.layers,
+            "dtype": model.dtype,
+        }
+        with open(
+            os.path.join(args.checkpoint_path, f"epoch_{epoch + 1}.pkl.json"), "w"
+        ) as f:
+            json.dump(info, f)
 
 
 def sparse_categorical_crossentropy(out, Y):
