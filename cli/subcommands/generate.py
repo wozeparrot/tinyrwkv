@@ -49,6 +49,12 @@ def generate_parser(subparsers: "_SubParsersAction[ArgumentParser]") -> None:
         type=float,
         default=0.1,
     )
+    parser.add_argument(
+        "--ignore_eot",
+        help="ignore end of text token (default: False)",
+        default=False,
+        action="store_true",
+    )
     parser.set_defaults(func=generate)
 
 
@@ -93,6 +99,10 @@ def generate(args: Namespace) -> None:
         # logits to cpu
         logits = logits.cpu().numpy()
 
+        # ignore end of text token if specified
+        if args.ignore_eot:
+            logits[0] = -1e9
+
         # sample
         sampled = sample_logits(
             logits,
@@ -104,11 +114,14 @@ def generate(args: Namespace) -> None:
             top_k=args.top_k,
         )
 
+        # update alpha counter
         alpha_counter[sampled] += 1
 
+        # break if end of text token
         if sampled == 0:
             break
 
+        # update last token
         last_token = sampled
         decoded = tokenizer.decode([sampled])
         print(decoded, end="", flush=True)
