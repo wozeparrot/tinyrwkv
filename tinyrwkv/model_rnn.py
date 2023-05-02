@@ -290,40 +290,41 @@ class RWKV_RNN:
 
         new_state = []
         for i, block in enumerate(self.blocks):
+            state_index = i * 5 * self.embed_size
             x, att_xx, att_aa, att_bb, att_pp, ffn_xx = block(
                 x,
                 state[
-                    i * 5 * self.embed_size
-                    + 0 * self.embed_size : i * 5 * self.embed_size
+                    state_index
+                    + 0 * self.embed_size : state_index
                     + 1 * self.embed_size
                 ],
                 state[
-                    i * 5 * self.embed_size
-                    + 1 * self.embed_size : i * 5 * self.embed_size
+                    state_index
+                    + 1 * self.embed_size : state_index
                     + 2 * self.embed_size
                 ],
                 state[
-                    i * 5 * self.embed_size
-                    + 2 * self.embed_size : i * 5 * self.embed_size
+                    state_index
+                    + 2 * self.embed_size : state_index
                     + 3 * self.embed_size
                 ],
                 state[
-                    i * 5 * self.embed_size
-                    + 3 * self.embed_size : i * 5 * self.embed_size
+                    state_index
+                    + 3 * self.embed_size : state_index
                     + 4 * self.embed_size
                 ],
                 state[
-                    i * 5 * self.embed_size
-                    + 4 * self.embed_size : i * 5 * self.embed_size
+                    state_index
+                    + 4 * self.embed_size : state_index
                     + 5 * self.embed_size
                 ],
             )
 
             new_state.append(Tensor.cat(att_xx, att_aa, att_bb, att_pp, ffn_xx))
 
-        state = Tensor.cat(*new_state)
-
         x = x.layernorm().linear(self.ln_out_weight, self.ln_out_bias)
         x = matvec(self.head, x)
+
+        state = Tensor.cat(*new_state)
 
         return Tensor.cat(x, state).realize()

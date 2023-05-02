@@ -9,6 +9,7 @@ from .subcommands import (
     preprocess,
     generate,
     compile,
+    benchmark,
     preprocess_gpt,
     generate_gpt,
     train,
@@ -31,6 +32,9 @@ def main() -> None:
 
     # compile subcommand
     compile.generate_parser(subparsers)
+
+    # benchmark subcommand
+    benchmark.generate_parser(subparsers)
 
     # preprocess gpt subcommand
     preprocess_gpt.generate_parser(subparsers)
