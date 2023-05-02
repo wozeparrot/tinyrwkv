@@ -278,6 +278,9 @@ class RWKV_GPT:
             weights = pickle.load(f)
 
             for k, v in tqdm(weights.items()):
+                if "time_curve" in k:
+                    continue
+
                 try:
                     w = cast(Tensor, get_child(self, k))
                 except:
