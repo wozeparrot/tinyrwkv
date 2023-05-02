@@ -3,7 +3,6 @@ from tqdm import tqdm
 import numpy as np
 
 import json
-import gc
 import pickle
 from argparse import Namespace, _SubParsersAction, ArgumentParser
 
