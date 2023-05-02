@@ -273,6 +273,8 @@ def train(args: Namespace) -> None:
         ) as f:
             weights = {}
             for key, param in get_state_dict(model).items():
+                if "time_curve" in key:
+                    continue
                 weights[key] = param.numpy()
             pickle.dump(weights, f)
 
@@ -314,6 +316,7 @@ def train(args: Namespace) -> None:
             json.dump(info, f)
 
 
+# cross entropy loss
 def sparse_categorical_crossentropy(out, Y):
     channels = out.shape[-1]
     YY = Y.flatten().astype(np.int32)
@@ -324,6 +327,7 @@ def sparse_categorical_crossentropy(out, Y):
     return out.mul(y).mean()
 
 
+# Lion optimizer
 class Lion(Optimizer):
     def __init__(
         self,
