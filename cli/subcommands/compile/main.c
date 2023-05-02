@@ -184,6 +184,14 @@ int main(int argc, char *argv[]) {
   }
   fprintf(stderr, "Using temperature: %f, tau: %f\n", temperature, tau);
 
+  // read token limit from args
+  int token_limit = 0;
+  if (argc > 3) {
+    token_limit = atoi(argv[3]);
+  }
+  fprintf(stderr, "Using token limit: %d (0: stop on eot, -1: ignore eot)\n",
+          token_limit);
+
   // setup input
   float *input = malloc(TINYRWKV_INPUT_SIZE);
   memcpy(input + TINYRWKV_DIM, init_state, TINYRWKV_STATE_SIZE);
@@ -213,13 +221,14 @@ int main(int argc, char *argv[]) {
   unsigned int last_token = input_tokens[tokenized_len - 1];
 
   // run model
+  unsigned int i = 0;
   while (1) {
     tinyrwkv_index_embed(tinyrwkv, last_token, input);
     tinyrwkv_infer(tinyrwkv, input, output);
     memcpy(input + TINYRWKV_DIM, output + TINYRWKV_VOCAB, TINYRWKV_STATE_SIZE);
 
     // -- sampling --
-    last_token = sample(output, temperature, tau, argc > 3);
+    last_token = sample(output, temperature, tau, token_limit != 0);
     if (last_token == 0)
       break;
 
@@ -227,6 +236,10 @@ int main(int argc, char *argv[]) {
     printf("%s", decoded);
     fflush(stdout);
     free(decoded);
+
+    i++;
+    if (token_limit > 0 && i >= token_limit)
+      break;
   }
 
   // cleanup
