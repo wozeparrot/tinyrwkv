@@ -23,7 +23,7 @@ int compare_index_value(const void *a, const void *b) {
   return (int)(100.f * (ib->value - ia->value));
 }
 
-int sample(float *logits, float temperature, float tau, bool ignore_eof) {
+int sample(float *logits, float temperature, float tau, bool ignore_eot) {
   // try to bypass nan
   for (unsigned int i = 0; i < 50277; i++) {
     if (logits[i] != logits[i]) {
@@ -31,7 +31,7 @@ int sample(float *logits, float temperature, float tau, bool ignore_eof) {
     }
   }
 
-  if (ignore_eof) {
+  if (ignore_eot) {
     logits[0] = -INFINITY;
   }
 
