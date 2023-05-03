@@ -9,8 +9,8 @@ def sample_logits(
     alpha_counter: Union[np.ndarray, None] = None,
     alpha_presence: float = 0.0,
     alpha_frequency: float = 0.0,
-    temperature: float = 0.8,
-    typical_tau: float = 0.0,
+    temperature: float = 0.85,
+    typical_tau: float = 0.95,
     top_k: int = 50,
 ) -> int:
     # try to prevent NaNs for at least a little bit
@@ -22,10 +22,9 @@ def sample_logits(
 
     # alpha sampling
     if alpha_counter is not None and alpha_presence > 0.0 and alpha_frequency > 0.0:
-        for i in range(logits.shape[0]):
-            logits[i] -= (alpha_counter[i] * alpha_frequency) + (
-                float(alpha_counter[i] > 0) * alpha_presence
-            )
+        logits -= (alpha_counter * alpha_frequency) + (
+            alpha_counter.clip(0, 1)
+        ) * alpha_presence
 
     # top-k sampling
     if top_k > 0:
