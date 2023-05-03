@@ -114,6 +114,7 @@ def train(args: Namespace) -> None:
     params = get_parameters(model)
 
     if args.optimizer == "adamw":
+        print("Using AdamW optimizer")
         optimizer = AdamW(
             params, lr=args.start_lr, b1=args.adam_b1, b2=args.adam_b2, wd=args.adam_wd
         )
@@ -130,6 +131,7 @@ def train(args: Namespace) -> None:
                 for i in range(len(optimizer.v)):
                     optimizer.v[i].assign(optimizer_state["v"][i])
     elif args.optimizer == "lion":
+        print("Using Lion optimizer")
         optimizer = Lion(
             params, lr=args.start_lr, b1=args.lion_b1, b2=args.lion_b2, wd=args.lion_wd
         )
@@ -141,7 +143,7 @@ def train(args: Namespace) -> None:
                     optimizer_state = pickle.load(f)
 
                 for i in range(len(optimizer.ea)):
-                    optimizer.ea[i].assign(optimizer_state["m"][i])
+                    optimizer.ea[i].assign(optimizer_state["ea"][i])
 
     else:
         raise NotImplementedError(f"unknown optimizer {args.optimizer}")
@@ -199,6 +201,7 @@ def train(args: Namespace) -> None:
             # gradient accumulation
             losses = []
             accuracies = []
+            grad_norms = []
             for mini_batch in range(args.gradient_accumulation):
                 # sample training data
                 sample = np.random.randint(
@@ -214,7 +217,7 @@ def train(args: Namespace) -> None:
                 # forward pass
                 out = model.forward(x)
                 out_lsm = out.log_softmax()
-                loss = sparse_categorical_crossentropy(out_lsm, y)
+                loss = sparse_categorical_crossentropy(out_lsm, y) + l2_wrap(out)
 
                 # scale gradients for gradient accumulation
                 loss = loss / args.gradient_accumulation
@@ -233,15 +236,26 @@ def train(args: Namespace) -> None:
                 accuracies.append(accuracy)
                 losses.append(loss)
 
+                # calculate gradient norm
+                grad_norm = 0
+                for param in optimizer.params:
+                    if param.grad is not None:
+                        grad_norm += (param.grad**2).sum().numpy()[0]
+                grad_norm = grad_norm**0.5
+                grad_norms.append(grad_norm)
+
                 # update tqdm
                 t.set_description(
-                    "mini batch %d | loss %.4f, acc %.4f | aloss %.4f, aacc %.4f"
+                    "mini batch %d | loss %.4f, acc %.4f, gn %.4f | aloss %.4f, aacc %.4f, agn %.4f | lr %.10f"
                     % (
                         mini_batch,
                         loss * args.gradient_accumulation,
                         accuracy,
+                        grad_norm,
                         (sum(losses) / len(losses)) * args.gradient_accumulation,
                         sum(accuracies) / len(accuracies),
+                        sum(grad_norms) / len(grad_norms),
+                        optimizer.lr,
                     )
                 )
 
@@ -261,8 +275,12 @@ def train(args: Namespace) -> None:
                         "loss": (sum(losses) / len(losses))
                         * args.gradient_accumulation,
                         "accuracy": sum(accuracies) / len(accuracies),
+                        "grad_norm": sum(grad_norms) / len(grad_norms),
                         "lr": optimizer.lr,
                         "tokens_processed": tokens_processed,
+                        "time_remaining": (t.total - t.n) / t.format_dict["rate"]
+                        if t.format_dict["rate"] and t.total
+                        else 0,
                     }
                 )
 
@@ -317,7 +335,7 @@ def train(args: Namespace) -> None:
 
 
 # cross entropy loss
-def sparse_categorical_crossentropy(out, Y):
+def sparse_categorical_crossentropy(out: Tensor, Y: np.ndarray) -> Tensor:
     channels = out.shape[-1]
     YY = Y.flatten().astype(np.int32)
     y = np.zeros((YY.shape[0], channels), np.float32)
@@ -325,6 +343,13 @@ def sparse_categorical_crossentropy(out, Y):
     y = y.reshape(list(Y.shape) + [channels])
     y = Tensor(y)
     return out.mul(y).mean()
+
+
+# l2 wrap
+def l2_wrap(logits: Tensor) -> Tensor:
+    return (
+        ((5e-5 * logits.max(-1, keepdim=True)[0] ** 2).sum()) / logits.shape[1]
+    ) / logits.shape[0]
 
 
 # Lion optimizer
@@ -351,6 +376,8 @@ class Lion(Optimizer):
             g = t.grad.realize()
 
             update = self.ea[i] * self.b1 + g * (1 - self.b1)
+            t.assign(
+                (t.detach() * (1 - self.lr * self.wd)) + (update.sign() * (-self.lr))
+            )
             self.ea[i].assign(self.ea[i] * self.b2 + g * (1 - self.b2))
-            t.assign(t.detach() + update.sign() * -self.lr)
         self.realize(self.ea)
