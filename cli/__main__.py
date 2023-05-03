@@ -8,6 +8,7 @@ import argparse
 from .subcommands import (
     preprocess,
     generate,
+    chat,
     compile,
     benchmark,
     preprocess_gpt,
@@ -29,6 +30,9 @@ def main() -> None:
 
     # generate subcommand
     generate.generate_parser(subparsers)
+
+    # chat subcommand
+    chat.generate_parser(subparsers)
 
     # compile subcommand
     compile.generate_parser(subparsers)
