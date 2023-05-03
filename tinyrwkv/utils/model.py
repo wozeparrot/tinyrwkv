@@ -6,7 +6,7 @@ def compile_net(run, special_names):
     functions = {}
     bufs = {}
     bufnum = 0
-    offset = 0
+    byte_offset = 0
     buf_offsets = {}
     statements = []
     bufs_to_save = {}
@@ -27,14 +27,18 @@ def compile_net(run, special_names):
 
                         # offset into weights
                         if key not in buf_offsets:
-                            buf_offsets[key] = offset
-                            offset += len(arg._buf)
+                            buf_offsets[key] = byte_offset
+                            byte_offset += len(arg._buf) * (
+                                4 if str(arg.dtype)[7:] == "float" else 2
+                            )
 
             # use offset into weights
             if key in special_names or bufs[key][0] not in bufs_to_save:
                 cargs.append(bufs[key][0])
             else:
-                cargs.append(f"tinyrwkv->weights + {buf_offsets[key]}")
+                cargs.append(
+                    f"({str(bufs[key][2])[7:]}*)(tinyrwkv->weights + {buf_offsets[key]})"
+                )
 
         statements.append(f"{fxn.name}({', '.join(cargs)});")
 

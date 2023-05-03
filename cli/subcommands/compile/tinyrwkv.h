@@ -16,11 +16,11 @@
 
 typedef struct {
   float *emb;
-  TINYRWKV_DTYPE *weights;
+  void *weights;
 
 } tinyrwkv_t;
 
-tinyrwkv_t *tinyrwkv_init(float *emb, TINYRWKV_DTYPE *weights) {
+tinyrwkv_t *tinyrwkv_init(float *emb, void *weights) {
   tinyrwkv_t *tinyrwkv = (tinyrwkv_t *)malloc(sizeof(tinyrwkv_t));
   tinyrwkv->emb = emb;
   tinyrwkv->weights = weights;

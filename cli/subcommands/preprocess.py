@@ -2,9 +2,10 @@ from tinygrad.tensor import Tensor
 from tqdm import tqdm
 import numpy as np
 
+from argparse import Namespace, _SubParsersAction, ArgumentParser
+import gc
 import json
 import pickle
-from argparse import Namespace, _SubParsersAction, ArgumentParser
 
 
 def generate_parser(subparsers: "_SubParsersAction[ArgumentParser]") -> None:
@@ -38,24 +39,13 @@ def preprocess(args: Namespace) -> None:
     else:
         raise Exception("Unknown file type")
 
-    # refine weights
+    # convert all weights to numpy
+    print("Converting weights to numpy...")
     for k, v in tqdm(weights.items()):
-        if args.dtype == "half" and "emb" not in k and "blocks.0.ln0" not in k:
-            if isinstance(v, np.ndarray):
-                v = v.astype(np.float16)
-            else:
-                v = v.half().numpy()
+        if isinstance(v, np.ndarray):
+            v = v.astype(np.float32)
         else:
-            if isinstance(v, np.ndarray):
-                v = v.astype(np.float32)
-            else:
-                v = v.float().numpy()
-
-        if ".time_" in k:
-            v = v.squeeze()
-        if ".time_decay" in k:
-            v = -np.exp(v)
-
+            v = v.float().numpy()
         weights[k] = v
 
     # precompute ln0 with emb.weight
@@ -68,6 +58,29 @@ def preprocess(args: Namespace) -> None:
         )
         .numpy()
     )
+    del weights["blocks.0.ln0.weight"]
+    del weights["blocks.0.ln0.bias"]
+
+    # refine weights
+    print("Refining weights...")
+    for k, v in tqdm(weights.items()):
+        if ".time_" in k:
+            v = v.squeeze()
+        if ".time_decay" in k:
+            v = -np.exp(v)
+
+        # convert to correct dtype
+        if (
+            args.dtype == "half"
+            and ".time_decay" not in k
+            and ".time_first" not in k
+            and "emb.weight" not in k
+        ):
+            v = v.astype(np.float16)
+        else:
+            v = v.astype(np.float32)
+
+        weights[k] = v
 
     print("Writing weights...")
     with open(args.output_path, "wb") as f:
