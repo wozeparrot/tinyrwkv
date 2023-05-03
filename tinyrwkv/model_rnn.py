@@ -291,33 +291,18 @@ class RWKV_RNN:
         new_state = []
         for i, block in enumerate(self.blocks):
             state_index = i * 5 * self.embed_size
+            state_xx_aa = state_index + 1 * self.embed_size
+            state_aa_bb = state_index + 2 * self.embed_size
+            state_bb_pp = state_index + 3 * self.embed_size
+            state_pp_xx = state_index + 4 * self.embed_size
+            state_end = state_index + 5 * self.embed_size
             x, att_xx, att_aa, att_bb, att_pp, ffn_xx = block(
                 x,
-                state[
-                    state_index
-                    + 0 * self.embed_size : state_index
-                    + 1 * self.embed_size
-                ],
-                state[
-                    state_index
-                    + 1 * self.embed_size : state_index
-                    + 2 * self.embed_size
-                ],
-                state[
-                    state_index
-                    + 2 * self.embed_size : state_index
-                    + 3 * self.embed_size
-                ],
-                state[
-                    state_index
-                    + 3 * self.embed_size : state_index
-                    + 4 * self.embed_size
-                ],
-                state[
-                    state_index
-                    + 4 * self.embed_size : state_index
-                    + 5 * self.embed_size
-                ],
+                state[state_index:state_xx_aa],
+                state[state_xx_aa:state_aa_bb],
+                state[state_aa_bb:state_bb_pp],
+                state[state_bb_pp:state_pp_xx],
+                state[state_pp_xx:state_end],
             )
 
             new_state.append(Tensor.cat(att_xx, att_aa, att_bb, att_pp, ffn_xx))
