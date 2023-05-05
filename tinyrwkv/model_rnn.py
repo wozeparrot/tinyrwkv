@@ -3,6 +3,7 @@ from tinygrad.jit import TinyJit
 import tinygrad.nn as nn
 from tqdm import tqdm
 
+from typing import cast
 import gc
 import json
 import pickle
@@ -56,7 +57,6 @@ class Att:
 
         # calculate output
         ww = k + self.time_first
-
         p = elemmax(att_pp, ww)
         e1 = (att_pp - p).exp()
         e2 = (ww - p).exp()
@@ -145,8 +145,8 @@ class Block:
         self.embed_size = embed_size
 
         self.att_ln = nn.LayerNorm(embed_size)
-        self.att_ln.weight.assign(att_ln_weight)
-        self.att_ln.bias.assign(att_ln_bias)
+        cast(Tensor, self.att_ln.weight).assign(att_ln_weight)
+        cast(Tensor, self.att_ln.bias).assign(att_ln_bias)
         self.att = Att(
             att_time_mix_k,
             att_time_mix_v,
@@ -160,8 +160,8 @@ class Block:
         )
 
         self.ffn_ln = nn.LayerNorm(embed_size)
-        self.ffn_ln.weight.assign(ffn_ln_weight)
-        self.ffn_ln.bias.assign(ffn_ln_bias)
+        cast(Tensor, self.ffn_ln.weight).assign(ffn_ln_weight)
+        cast(Tensor, self.ffn_ln.bias).assign(ffn_ln_bias)
         self.ffn = Ffn(
             ffn_time_mix_k,
             ffn_time_mix_r,
