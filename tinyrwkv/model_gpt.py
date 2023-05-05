@@ -9,7 +9,7 @@ import math
 import pickle
 
 from utils.misc import get_child
-from wkv import WKV, ConvWKV
+from wkv import WKV, ConvWKV, OpenCLWKV
 
 
 class Embedding:
@@ -116,7 +116,8 @@ class TimeMix:
         self.receptance = nn.Linear(embed_size, embed_size, bias=False)
         self.value = nn.Linear(embed_size, embed_size, bias=False)
 
-        self.wkv = ConvWKV()
+        # self.wkv = ConvWKV()
+        self.wkv = OpenCLWKV()
 
         self.output = nn.Linear(embed_size, embed_size, bias=False)
 
@@ -132,7 +133,7 @@ class TimeMix:
         v = self.value(xv)
 
         B, T, C = x.shape
-        rwkv = r * self.wkv(B, T, C, self.time_decay, self.time_first, k, v)
+        rwkv = r * self.wkv(B, T, C, self.time_first, self.time_decay, k, v)
 
         rwkv = self.output(rwkv)
         return rwkv
@@ -205,9 +206,6 @@ class RWKV_GPT:
             weights = pickle.load(f)
 
             for k, v in tqdm(weights.items()):
-                if "time_curve" in k:
-                    continue
-
                 if "ln0" in k:
                     if "weight" in k:
                         cast(Tensor, self.ln0.weight).assign(v)

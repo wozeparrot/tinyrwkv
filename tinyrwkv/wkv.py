@@ -1,6 +1,11 @@
-from tinygrad.tensor import Tensor
+from tinygrad.helpers import dtypes, prod
+from tinygrad.lazy import LazyBuffer, create_lazybuffer, Device
+from tinygrad.ops import ASTRunner, LazyOp, LoadOps
+from tinygrad.tensor import Tensor, Function
 
 import abc
+import os
+from typing import Optional, Tuple
 
 from utils.tensor import elemmax
 
@@ -94,8 +99,8 @@ class ConvWKV(WKV):
 
         time_curve = Tensor([-(T - 2 - i) for i in range(T - 1)], requires_grad=False)
 
-        time_w = (time_first.exp().unsqueeze(1) * time_curve).cat(
-            time_decay.unsqueeze(1), dim=-1
+        time_w = (time_decay.exp().unsqueeze(1) * time_curve).cat(
+            time_first.unsqueeze(1), dim=-1
         )
         w = time_w.exp().unsqueeze(1)
         w = w.reshape(w.shape[0], w.shape[1], w.shape[2], 1)
@@ -126,6 +131,7 @@ class ConvWKV(WKV):
 
 
 # standard WKV kernel but trying to parallelize more
+# turns out to be slower than the standard one
 class SplitWKV(WKV):
     def __call__(
         self,
@@ -175,3 +181,91 @@ class SplitWKV(WKV):
             wkv.append(a / b)
 
         return Tensor.cat(*wkv, dim=1)
+
+
+# load kernels once for opencl wkv
+with open(os.path.join(os.path.dirname(__file__), "kernels/wkv_forward.cl"), "r") as f:
+    WKV_FORWARD_PRG = f.read()
+
+
+# opencl WKV runner
+def opencl_wkv(
+    ret: LazyBuffer,
+    shape: LazyBuffer,
+    time_first: LazyBuffer,
+    time_decay: LazyBuffer,
+    key: LazyBuffer,
+    value: LazyBuffer,
+):
+    ret.realized = Device[ret.device].buffer(prod(ret.shape), ret.dtype)
+
+    ASTRunner(
+        "wkv_forward",
+        WKV_FORWARD_PRG,
+        global_size=[ret.shape[0] * ret.shape[2]],
+        local_size=[min(ret.shape[2], 32)],
+    ).build(Device[ret.device].runtime).exec(
+        [ret, shape, time_first, time_decay, key, value]
+    )
+    return ret.realized
+
+
+# opencl WKV function
+class OpenCLWKVFunction(Function):
+    def forward(
+        self,
+        shape: LazyBuffer,
+        time_first: LazyBuffer,
+        time_decay: LazyBuffer,
+        key: LazyBuffer,
+        value: LazyBuffer,
+        _shape: Tuple[int, int, int],
+    ) -> LazyBuffer:
+        ast = LazyOp(
+            LoadOps.CUSTOM,
+            (
+                shape.contiguous(),
+                time_first.contiguous(),
+                time_decay.contiguous(),
+                key.contiguous(),
+                value.contiguous(),
+            ),
+            opencl_wkv,
+        )
+        return create_lazybuffer(
+            time_first.device, _shape, LoadOps, ast, time_first.dtype
+        )
+
+    def backward(
+        self, grad_output: LazyBuffer
+    ) -> Tuple[
+        Optional[LazyBuffer],
+        Optional[LazyBuffer],
+        Optional[LazyBuffer],
+        Optional[LazyBuffer],
+    ]:
+        ...
+
+
+# opencl WKV kernel
+class OpenCLWKV(WKV):
+    def __call__(
+        self,
+        B: int,
+        T: int,
+        C: int,
+        time_first: Tensor,
+        time_decay: Tensor,
+        key: Tensor,
+        value: Tensor,
+    ) -> Tensor:
+        time_decay = -(time_decay.exp())
+
+        return OpenCLWKVFunction.apply(
+            Tensor([B, T, C], requires_grad=False, dtype=dtypes.int32),
+            time_first,
+            time_decay,
+            key,
+            value,
+            _shape=(B, T, C),
+        )
