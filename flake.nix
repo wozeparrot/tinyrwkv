@@ -11,7 +11,7 @@
     };
 
     tinygrad = {
-      url = "github:geohot/tinygrad";
+      url = "github:geohot/tinygrad/9628a3f190cc069865d8a13d13a1312a95128c74";
       flake = false;
     };
   };
