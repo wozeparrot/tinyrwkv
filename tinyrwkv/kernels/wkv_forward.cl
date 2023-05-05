@@ -14,8 +14,11 @@ __kernel void wkv_forward(global float* restrict const ret, constant const int* 
     constant const float* restrict const v = value + offset;
     global float* restrict const wkv = ret + offset;
 
+    // state
     float aa = 0, bb = 0, pp = -1e38;
-    for (int i = 0; i < T; i++) {
+
+    // do up till the last token in the loop
+    for (int i = 0; i < T - 1; i++) {
         const int ii = i * C;
         const float kk = k[ii];
         const float vv = v[ii];
@@ -24,14 +27,25 @@ __kernel void wkv_forward(global float* restrict const ret, constant const int* 
         const float p1 = max(pp, ww1);
         const float e11 = exp(pp - p1);
         const float e21 = exp(ww1 - p1);
-        wkv[ii] = (e11 * aa + e21 * vv) / (e11 * bb + e21);
+        wkv[ii] = fma(e11, aa, e21 * vv) / fma(e11, bb, e21);
 
         const float ww2 = w + pp;
         const float p2 = max(ww2, kk);
         const float e12 = exp(ww2 - p2);
         const float e22 = exp(kk - p2);
-        aa = e12 * aa + e22 * vv;
-        bb = e12 * bb + e22;
+        aa = fma(e12, aa, e22 * vv);
+        bb = fma(e12, bb, e22);
         pp = p2;
     }
+
+    // do the last token outside the loop to avoid having to compute state again
+    const int ii = (T - 1) * C;
+    const float kk = k[ii];
+    const float vv = v[ii];
+
+    const float ww1 = u + kk;
+    const float p1 = max(pp, ww1);
+    const float e11 = exp(pp - p1);
+    const float e21 = exp(ww1 - p1);
+    wkv[ii] = fma(e11, aa, e21 * vv) / fma(e11, bb, e21);
 }

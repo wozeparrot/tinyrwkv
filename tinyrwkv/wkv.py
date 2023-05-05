@@ -259,12 +259,10 @@ class OpenCLWKV(WKV):
         key: Tensor,
         value: Tensor,
     ) -> Tensor:
-        time_decay = -(time_decay.exp())
-
         return OpenCLWKVFunction.apply(
             Tensor([B, T, C], requires_grad=False, dtype=dtypes.int32),
             time_first,
-            time_decay,
+            -(time_decay.exp()),
             key,
             value,
             _shape=(B, T, C),
