@@ -1,6 +1,6 @@
 from tinygrad.tensor import Tensor
 from tqdm import tqdm
-from typing import Callable, Union, cast
+from typing import Callable, cast
 import numpy as np
 import tinygrad.nn as nn
 
@@ -9,6 +9,7 @@ import math
 import pickle
 
 from utils.misc import get_child
+from wkv import WKV, ConvWKV
 
 
 class Embedding:
@@ -57,12 +58,7 @@ class ChannelMix:
 
     def __call__(self, x: Tensor) -> Tensor:
         # time shift
-        xx = (
-            x[:, :-1, :]
-            .reshape((1, x.shape[0], x.shape[1] - 1, x.shape[2]))
-            .pad2d((0, 0, 1, 0))
-            .reshape((x.shape[0], x.shape[1], x.shape[2]))
-        )
+        xx = x.slice([None, (-1, x.shape[1] - 1), None])
         xk = self.time_mix_k * (x - xx) + xx
         xr = self.time_mix_r * (x - xx) + xx
 
@@ -72,61 +68,6 @@ class ChannelMix:
 
         rkv = self.receptance(xr).sigmoid() * kv
         return rkv
-
-
-class WKV:
-    ctx_size: int
-
-    time_curve: Tensor
-
-    def __init__(self, ctx_size: int):
-        self.ctx_size = ctx_size
-
-        self.time_curve = Tensor(
-            [-(ctx_size - 2 - i) for i in range(ctx_size - 1)], requires_grad=False
-        )
-
-    def __call__(
-        self,
-        T: int,
-        C: int,
-        time_first: Tensor,
-        time_decay: Tensor,
-        key: Tensor,
-        value: Tensor,
-    ) -> Tensor:
-        ek = key.clip(-60, 60).transpose(1, 2).exp()
-        ekv = ek * value.transpose(1, 2)
-
-        time_w = (
-            time_first.exp().unsqueeze(1) * self.time_curve[self.ctx_size - T :]
-        ).cat(time_decay.unsqueeze(1), dim=-1)
-        w = time_w.exp().unsqueeze(1)
-        w = w.reshape(w.shape[0], w.shape[1], w.shape[2], 1)
-
-        ekv = (
-            ekv.reshape(1, *ekv.shape)
-            .pad2d((T - 1, 0, 0, 0))
-            .reshape(ekv.shape[0], ekv.shape[1], ekv.shape[2] + T - 1, 1)
-        )
-        wkv = ekv.conv2d(w, groups=C).reshape(
-            ekv.shape[0], ekv.shape[1], ekv.shape[2] - T + 1
-        )
-        ek = (
-            ek.reshape(1, *ek.shape)
-            .pad2d((T - 1, 0, 0, 0))
-            .reshape(ek.shape[0], ek.shape[1], ek.shape[2] + T - 1, 1)
-        )
-        wk = (
-            ek.conv2d(w, groups=C).reshape(
-                ek.shape[0], ek.shape[1], ek.shape[2] - T + 1
-            )
-            + 1e-8
-        )
-
-        wkv = (wkv / wk).transpose(1, 2)
-
-        return wkv
 
 
 class TimeMix:
@@ -146,7 +87,7 @@ class TimeMix:
 
     output: nn.Linear
 
-    def __init__(self, i: int, ctx_size: int, embed_size: int, layers: int):
+    def __init__(self, i: int, embed_size: int, layers: int):
         ratio_0_to_1 = i / (layers - 1)
         ratio_1_to_almost_0 = 1.0 - (i / layers)
 
@@ -175,18 +116,13 @@ class TimeMix:
         self.receptance = nn.Linear(embed_size, embed_size, bias=False)
         self.value = nn.Linear(embed_size, embed_size, bias=False)
 
-        self.wkv = WKV(ctx_size)
+        self.wkv = ConvWKV()
 
         self.output = nn.Linear(embed_size, embed_size, bias=False)
 
     def __call__(self, x: Tensor) -> Tensor:
         # time shift
-        xx = (
-            x[:, :-1, :]
-            .reshape((1, x.shape[0], x.shape[1] - 1, x.shape[2]))
-            .pad2d((0, 0, 1, 0))
-            .reshape((x.shape[0], x.shape[1], x.shape[2]))
-        )
+        xx = x.slice([None, (-1, x.shape[1] - 1), None])
         xk = self.time_mix_k * (x - xx) + xx
         xv = self.time_mix_v * (x - xx) + xx
         xr = self.time_mix_r * (x - xx) + xx
@@ -195,8 +131,8 @@ class TimeMix:
         r = self.receptance(xr).sigmoid()
         v = self.value(xv)
 
-        _, T, C = x.shape
-        rwkv = r * self.wkv(T, C, self.time_decay, self.time_first, k, v)
+        B, T, C = x.shape
+        rwkv = r * self.wkv(B, T, C, self.time_decay, self.time_first, k, v)
 
         rwkv = self.output(rwkv)
         return rwkv
@@ -205,30 +141,22 @@ class TimeMix:
 class Block:
     i: int
 
-    ln0: Union[nn.LayerNorm, None] = None
-
     ln1: nn.LayerNorm
     ln2: nn.LayerNorm
 
     att: TimeMix
     ffn: ChannelMix
 
-    def __init__(self, i: int, ctx_size: int, embed_size: int, layers: int):
+    def __init__(self, i: int, embed_size: int, layers: int):
         self.i = i
-
-        if i == 0:
-            self.ln0 = nn.LayerNorm(embed_size)
 
         self.ln1 = nn.LayerNorm(embed_size)
         self.ln2 = nn.LayerNorm(embed_size)
 
-        self.att = TimeMix(i, ctx_size, embed_size, layers)
+        self.att = TimeMix(i, embed_size, layers)
         self.ffn = ChannelMix(i, embed_size, layers)
 
     def __call__(self, x: Tensor) -> Tensor:
-        if self.i == 0:
-            x = cast(nn.LayerNorm, self.ln0)(x)
-
         ln1x = self.ln1(x)
         x = x + self.att(ln1x)
 
@@ -239,7 +167,6 @@ class Block:
 
 
 class RWKV_GPT:
-    ctx_size: int
     vocab_size: int
     embed_size: int
     dtype: str
@@ -251,9 +178,7 @@ class RWKV_GPT:
     ln_out: nn.LayerNorm
     head: nn.Linear
 
-    def __init__(self, path: str, ctx_size: int):
-        self.ctx_size = ctx_size
-
+    def __init__(self, path: str):
         # load info file
         with open(path + ".json", "r") as f:
             info = json.load(f)
@@ -266,9 +191,11 @@ class RWKV_GPT:
         # setup model
         self.emb = Embedding(self.vocab_size, self.embed_size)
 
+        self.ln0 = nn.LayerNorm(self.embed_size)
+
         self.blocks = []
         for i in range(self.layers):
-            self.blocks.append(Block(i, self.ctx_size, self.embed_size, self.layers))
+            self.blocks.append(Block(i, self.embed_size, self.layers))
 
         self.ln_out = nn.LayerNorm(self.embed_size)
         self.head = nn.Linear(self.embed_size, self.vocab_size, bias=False)
@@ -280,6 +207,12 @@ class RWKV_GPT:
             for k, v in tqdm(weights.items()):
                 if "time_curve" in k:
                     continue
+
+                if "ln0" in k:
+                    if "weight" in k:
+                        cast(Tensor, self.ln0.weight).assign(v)
+                    elif "bias" in k:
+                        cast(Tensor, self.ln0.bias).assign(v)
 
                 try:
                     w = cast(Tensor, get_child(self, k))
@@ -293,6 +226,8 @@ class RWKV_GPT:
 
     def forward(self, idx: Tensor) -> Tensor:
         x = self.emb(idx)
+
+        x = self.ln0(x)
 
         x = x.sequential(cast(list[Callable[[Tensor], Tensor]], self.blocks))
 
