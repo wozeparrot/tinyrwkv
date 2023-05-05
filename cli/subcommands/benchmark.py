@@ -14,12 +14,6 @@ def generate_parser(subparsers: "_SubParsersAction[ArgumentParser]") -> None:
         help="benchmark the rnn mode",
     )
     parser.add_argument(
-        "--tokenizer_path",
-        help="path to the tokenizer file",
-        type=str,
-        default="tokenizer.json",
-    )
-    parser.add_argument(
         "--model_path", help="path to the weights file", type=str, required=True
     )
     parser.set_defaults(func=benchmark)
@@ -28,20 +22,14 @@ def generate_parser(subparsers: "_SubParsersAction[ArgumentParser]") -> None:
 def benchmark(args: Namespace) -> None:
     Tensor.no_grad = True
 
-    # load tokenizer
-    tokenizer = Tokenizer.from_file(args.tokenizer_path)
-
     # load model
     model = RWKV_RNN(args.model_path)
-    assert (
-        model.vocab_size == tokenizer.get_vocab_size()
-    ), "vocab size mismatch (are you using the correct tokenizer?)"
 
     last_token = 510
     state = model.init_state()
 
     # warmup 10 tokens
-    for i in trange(10):
+    for _ in trange(10):
         embed = model.index_embed(int(last_token))
         the_input = model.build_input(embed, state)
         the_output = model.forward(the_input)
@@ -52,7 +40,7 @@ def benchmark(args: Namespace) -> None:
 
     # benchmark 1000 tokens
     now = time.time()
-    for i in trange(1000):
+    for _ in trange(1000):
         embed = model.index_embed(int(last_token))
         the_input = model.build_input(embed, state)
         the_output = model.forward(the_input)
