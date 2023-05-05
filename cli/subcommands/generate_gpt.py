@@ -79,7 +79,7 @@ def generate_gpt(args: Namespace) -> None:
 
     alpha_counter = np.zeros(50277)
     while True:
-        the_input = Tensor([ctx]).realize()
+        the_input = Tensor([ctx])
         out = model.forward(the_input)
         logits = out.cpu().numpy()[-1][-1]
 
