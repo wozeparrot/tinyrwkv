@@ -100,7 +100,7 @@ def train(args: Namespace) -> None:
     # load model
     print("Loading model...")
     if args.resume_path is not None:
-        model = RWKV_GPT(args.resume_path, args.ctx_size)
+        model = RWKV_GPT(args.resume_path)
     else:
         raise NotImplementedError("TODO: implement pretraining from scratch")
     print(f"Model has ~{count_parameters(model) / 1000 / 1000}M parameters")
@@ -205,10 +205,10 @@ def train(args: Namespace) -> None:
             for mini_batch in range(args.gradient_accumulation):
                 # sample training data
                 sample = np.random.randint(
-                    0, len(train_data) - (model.ctx_size + 1), size=args.batch_size
+                    0, len(train_data) - (args.ctx_size + 1), size=args.batch_size
                 )
                 sampled = [
-                    train_data[samp : samp + (model.ctx_size + 1)] for samp in sample
+                    train_data[samp : samp + (args.ctx_size + 1)] for samp in sample
                 ]
 
                 x = Tensor([samp[:-1] for samp in sampled], requires_grad=False)
@@ -265,7 +265,7 @@ def train(args: Namespace) -> None:
 
             # keep track of some stats
             tokens_processed += (
-                args.batch_size * model.ctx_size * args.gradient_accumulation
+                args.batch_size * args.ctx_size * args.gradient_accumulation
             )
 
             # wandb logging
@@ -291,8 +291,6 @@ def train(args: Namespace) -> None:
         ) as f:
             weights = {}
             for key, param in get_state_dict(model).items():
-                if "time_curve" in key:
-                    continue
                 weights[key] = param.numpy()
             pickle.dump(weights, f)
 
