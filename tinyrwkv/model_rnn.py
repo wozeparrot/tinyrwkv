@@ -8,8 +8,6 @@ import gc
 import json
 import pickle
 
-from utils.tensor import matvec, elemmax
-
 
 class Att:
     time_mix_k: Tensor
@@ -51,13 +49,13 @@ class Att:
         xv = self.time_mix_v * (x - att_xx) + att_xx
         xr = self.time_mix_r * (x - att_xx) + att_xx
 
-        k = matvec(self.key, xk)
-        v = matvec(self.value, xv)
-        r = matvec(self.receptance, xr).sigmoid()
+        k = xk @ self.key.T
+        v = xv @ self.value.T
+        r = (xr @ self.receptance.T).sigmoid()
 
         # calculate output
         ww = k + self.time_first
-        p = elemmax(att_pp, ww)
+        p = att_pp.maximum(ww)
         e1 = (att_pp - p).exp()
         e2 = (ww - p).exp()
         a = (e1 * att_aa) + (e2 * v)
@@ -66,12 +64,12 @@ class Att:
 
         # update state
         ww = att_pp + self.time_decay
-        p = elemmax(ww, k)
+        p = ww.maximum(k)
         e1 = (ww - p).exp()
         e2 = (k - p).exp()
 
         return (
-            matvec(self.output, rwkv),
+            rwkv @ self.output.T,
             x,
             ((e1 * att_aa) + (e2 * v)),
             ((e1 * att_bb) + e2),
@@ -104,9 +102,9 @@ class Ffn:
         xk = self.time_mix_k * (x - ffn_xx) + ffn_xx
         xr = self.time_mix_r * (x - ffn_xx) + ffn_xx
 
-        k = matvec(self.key, xk).relu().square()
-        kv = matvec(self.value, k)
-        r = matvec(self.receptance, xr).sigmoid()
+        k = (xk @ self.key.T).relu().square()
+        kv = k @ self.value.T
+        r = (xr @ self.receptance.T).sigmoid()
         rkv = r * kv
 
         return rkv, x
@@ -308,7 +306,7 @@ class RWKV_RNN:
             new_state.append(Tensor.cat(att_xx, att_aa, att_bb, att_pp, ffn_xx))
 
         x = x.layernorm().linear(self.ln_out_weight, self.ln_out_bias)
-        x = matvec(self.head, x)
+        x = x @ self.head.T
 
         state = Tensor.cat(*new_state)
 

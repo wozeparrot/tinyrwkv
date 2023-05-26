@@ -12,27 +12,6 @@ from utils.misc import get_child
 from wkv import WKV, ConvWKV, OpenCLWKV
 
 
-class Embedding:
-    vocab_size: int
-    embed_size: int
-    weight: Tensor
-
-    def __init__(self, vocab_size: int, embed_size: int):
-        self.vocab_size = vocab_size
-        self.embed_size = embed_size
-        self.weight = Tensor.scaled_uniform(vocab_size, embed_size)
-
-    def __call__(self, idx: Tensor) -> Tensor:
-        idxnp = idx.numpy().astype(np.int32)
-        onehot = np.zeros(
-            (idx.shape[0], idx.shape[1], self.vocab_size), dtype=np.float32
-        )
-        for i in range(idx.shape[0]):
-            onehot[i, np.arange(idx.shape[1]), idxnp[i]] = 1
-
-        return Tensor(onehot) @ self.weight
-
-
 class ChannelMix:
     time_mix_k: Tensor
     time_mix_r: Tensor
@@ -172,7 +151,7 @@ class RWKV_GPT:
     embed_size: int
     dtype: str
 
-    emb: Embedding
+    emb: nn.Embedding
 
     blocks: list[Block]
 
@@ -190,7 +169,7 @@ class RWKV_GPT:
         self.dtype = info["dtype"]
 
         # setup model
-        self.emb = Embedding(self.vocab_size, self.embed_size)
+        self.emb = nn.Embedding(self.vocab_size, self.embed_size)
 
         self.ln0 = nn.LayerNorm(self.embed_size)
 
