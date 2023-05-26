@@ -11,7 +11,7 @@
     };
 
     tinygrad = {
-      url = "github:geohot/tinygrad/9628a3f190cc069865d8a13d13a1312a95128c74";
+      url = "github:geohot/tinygrad";
       flake = false;
     };
   };
@@ -46,6 +46,7 @@
                   networkx
                   numpy
                   pillow
+                  pyopencl
                   requests
                   tqdm
                 ];
@@ -56,14 +57,13 @@
                 mypy
                 numpy
                 pydot
-                pyopencl
                 tinygrad
                 tokenizers
                 torch
                 tqdm
                 wandb
               ];
-            llvmPackages = pkgs.llvmPackages_latest;
+            llvmPackages = pkgs.llvmPackages_15;
           in
             with pkgs; [
               (python3.withPackages python-packages)
