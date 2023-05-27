@@ -64,9 +64,10 @@
                 wandb
               ];
             llvmPackages = pkgs.llvmPackages_15;
+            python = pkgs.python310;
           in
             with pkgs; [
-              (python3.withPackages python-packages)
+              (python.withPackages python-packages)
               rust-toolchain
               llvmPackages.clang
               llvmPackages.libunwind
