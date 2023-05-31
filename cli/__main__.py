@@ -15,6 +15,7 @@ from .subcommands import (
     generate_gpt,
     train,
     benchmark_gpt,
+    test_wkv,
 )
 
 
@@ -52,6 +53,9 @@ def main() -> None:
 
     # benchmark gpt subcommand
     benchmark_gpt.generate_parser(subparsers)
+
+    # test wkv subcommand
+    test_wkv.generate_parser(subparsers)
 
     args = parser.parse_args()
     np.random.seed(args.seed)
