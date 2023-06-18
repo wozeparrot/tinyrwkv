@@ -1,11 +1,12 @@
 # tinyrwkv: A tinier port of RWKV-LM
 
-A port of the [RWKV-LM](https://github.com/BlinkDL/RWKV-LM) large language model to the [tinygrad](https://tinygrad.org/) framework.
+A port of the [RWKV-LM](https://github.com/BlinkDL/RWKV-LM) family of large language model to the [tinygrad](https://tinygrad.org/) framework.
 
 ## Roadmap
 
 - [ ] Implement the WKV kernel as a custom function
 - [ ] Optimize more
+- [ ] Add support for the world model and tokenizer
 
 ## Dependencies
 
@@ -13,10 +14,8 @@ Currently, requires tinygrad from git or just use the nix flake.
 
 ### Python
 ```
-mypy
 numpy
-pydot
-pyopencl
+pydot (only for GRAPH=1)
 tinygrad
 tokenizers
 torch (only for loading pytorch weights)
