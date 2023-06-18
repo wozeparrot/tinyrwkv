@@ -8,11 +8,11 @@
         "rust-analyzer-src": "rust-analyzer-src"
       },
       "locked": {
-        "lastModified": 1685427675,
-        "narHash": "sha256-fWvqK8RhC6LABuUM7JL+loHhoRFcJx8rkAXGroVeKKw=",
+        "lastModified": 1687069263,
+        "narHash": "sha256-24zZ2QhF5XnKUM2ecuJLH32fY9SYyM1+v6kAmw4pB7Y=",
         "owner": "nix-community",
         "repo": "fenix",
-        "rev": "9ea56d5de762971f6a7319711bae0532ca454dc9",
+        "rev": "8e2127fcde2005afb37e25952846c97c96c54269",
         "type": "github"
       },
       "original": {
@@ -26,11 +26,11 @@
         "systems": "systems"
       },
       "locked": {
-        "lastModified": 1681202837,
-        "narHash": "sha256-H+Rh19JDwRtpVPAWp64F+rlEtxUWBAQW28eAi3SRSzg=",
+        "lastModified": 1685518550,
+        "narHash": "sha256-o2d0KcvaXzTrPRIo0kOLV0/QXHhDQ5DTi+OxcjO8xqY=",
         "owner": "numtide",
         "repo": "flake-utils",
-        "rev": "cfacdce06f30d2b68473a46042957675eebb3401",
+        "rev": "a1720a10a6cfe8234c0e93907ffe81be440f4cef",
         "type": "github"
       },
       "original": {
@@ -41,11 +41,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1685399834,
-        "narHash": "sha256-Lt7//5snriXSdJo5hlVcDkpERL1piiih0UXIz1RUcC4=",
+        "lastModified": 1687103638,
+        "narHash": "sha256-dwy/TK6Db5W7ivcgmcxUykhFwodIg0jrRzOFt7H5NUc=",
         "owner": "nixos",
         "repo": "nixpkgs",
-        "rev": "58c85835512b0db938600b6fe13cc3e3dc4b364e",
+        "rev": "91430887645a0953568da2f3e9a3a3bb0a0378ac",
         "type": "github"
       },
       "original": {
@@ -66,11 +66,11 @@
     "rust-analyzer-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1685378411,
-        "narHash": "sha256-Ufkqek5m8GzV3cz3Mw7bc0hO1d5hN0cO5BoTAK303K8=",
+        "lastModified": 1686992290,
+        "narHash": "sha256-VJ/OYQPULSaMGPqUDaDKJUb3DrI7xMzuiSYMmljtpQo=",
         "owner": "rust-lang",
         "repo": "rust-analyzer",
-        "rev": "bc8295255c5bcc293251d47590dcbfd320eaab87",
+        "rev": "fcfc6afe0526123ff43086990356bf175664fdfa",
         "type": "github"
       },
       "original": {
@@ -98,11 +98,11 @@
     "tinygrad": {
       "flake": false,
       "locked": {
-        "lastModified": 1685494166,
-        "narHash": "sha256-dP1wXIqDYhPeCaipdnjobuM/IOksbVqMNgnRbtq7ctg=",
+        "lastModified": 1687123779,
+        "narHash": "sha256-CMmAbPqnRQkckJk+2flCfrXzypu4Idzsrfx7d2vyeVc=",
         "owner": "geohot",
         "repo": "tinygrad",
-        "rev": "1272d8526a8e09b90afb2c43ee9211ae1d032554",
+        "rev": "ccb51ff5b0f5a29dd86d9f4f3b6994d59969a659",
         "type": "github"
       },
       "original": {

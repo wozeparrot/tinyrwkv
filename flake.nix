@@ -47,6 +47,7 @@
                   numpy
                   pillow
                   pyopencl
+                  pyyaml
                   requests
                   tqdm
                 ];
