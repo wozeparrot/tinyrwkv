@@ -61,7 +61,7 @@ __kernel void wkv_backward(global float* restrict const ret, constant const int*
     gu[offsetBC] = rgu;
 
     // state
-    aa = 0, bb = 0, pp = -1e38;
+    aa = 0, bb = 0, pp = -1e38f;
     for (int i = 0; i < T; i++) {
         const int ii = i * C;
         const float kk = k[ii];
