@@ -15,7 +15,7 @@ __kernel void wkv_forward(global float* restrict const ret, constant const int* 
     global float* restrict const wkv = ret + offset;
 
     // state
-    float aa = 0, bb = 0, pp = -1e38;
+    float aa = 0, bb = 0, pp = -1e38f;
 
     // do up till the last token in the loop
     for (int i = 0; i < T - 1; i++) {
