@@ -23,7 +23,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         prog="tinyrwkv-cli", description="CLI for tinyrwkv"
     )
-    parser.add_argument("--seed", help="seed for random", type=int, default=None)
+    parser.add_argument("--seed", help="seed for random", type=int, default=42)
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
