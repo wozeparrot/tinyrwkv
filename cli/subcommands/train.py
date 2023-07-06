@@ -1,4 +1,5 @@
-from tinygrad.nn.optim import Optimizer, AdamW, get_parameters, get_state_dict
+from tinygrad.nn.optim import Optimizer, AdamW
+from tinygrad.state import get_parameters, get_state_dict
 from tinygrad.tensor import Tensor
 from tokenizers import Tokenizer
 from tqdm import trange

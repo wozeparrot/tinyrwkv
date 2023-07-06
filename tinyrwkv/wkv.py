@@ -1,5 +1,5 @@
 from tinygrad.helpers import dtypes, prod
-from tinygrad.lazy import LazyBuffer, create_lazybuffer, Device
+from tinygrad.lazy import LazyBuffer, ShapeTracker, create_lazybuffer, Device
 from tinygrad.ops import ASTRunner, LazyOp, LoadOps, BinaryOps, UnaryOps, MovementOps
 from tinygrad.tensor import Tensor, Function
 
@@ -215,7 +215,7 @@ class OpenCLWKVFunction(Function):
             opencl_wkv_forward,
         )
         self.wkv = create_lazybuffer(
-            time_first.device, _shape, LoadOps, ast, time_first.dtype
+            time_first.device, ShapeTracker(_shape), LoadOps, ast, time_first.dtype
         )
         return self.wkv
 
@@ -243,43 +243,39 @@ class OpenCLWKVFunction(Function):
         )
         ret = create_lazybuffer(
             grad_output.device,
-            (self._shape[0] * 2 + 2, self._shape[1], self._shape[2]),
+            ShapeTracker(self._shape[0] * 2 + 2, self._shape[1], self._shape[2]),
             LoadOps,
             ast,
             grad_output.dtype,
         )
-        g_time_first = ret.movement_op(
-            MovementOps.SHRINK,
+        g_time_first = ret.shrink(
             (
                 (self._shape[0] * 0, self._shape[0] * 1),
                 (0, self._shape[1]),
                 (0, self._shape[2]),
             ),
         )
-        g_time_decay = ret.movement_op(
-            MovementOps.SHRINK,
+        g_time_decay = ret.shrink(
             (
                 (self._shape[0] * 1, self._shape[0] * 2),
                 (0, self._shape[1]),
                 (0, self._shape[2]),
             ),
         )
-        g_key = ret.movement_op(
-            MovementOps.SHRINK,
+        g_key = ret.shrink(
             (
                 (self._shape[0] * 2, self._shape[0] * 2 + 1),
                 (0, 1),
                 (0, self._shape[2]),
             ),
-        ).movement_op(MovementOps.RESHAPE, (self._shape[2],))
-        g_value = ret.movement_op(
-            MovementOps.SHRINK,
+        ).reshape((self._shape[2],))
+        g_value = ret.shrink(
             (
                 (self._shape[0] * 2 + 1, self._shape[0] * 2 + 2),
                 (0, 1),
                 (0, self._shape[2]),
             ),
-        ).movement_op(MovementOps.RESHAPE, (self._shape[2],))
+        ).reshape((self._shape[2],))
         print(g_time_first.shape)
         print(g_time_decay.shape)
         print(g_key.shape)
