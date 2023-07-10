@@ -1,6 +1,6 @@
 # tinyrwkv: A tinier port of RWKV-LM
 
-A port of the [RWKV-LM](https://github.com/BlinkDL/RWKV-LM) family of large language model to the [tinygrad](https://tinygrad.org/) framework.
+A port of the [RWKV-LM](https://github.com/BlinkDL/RWKV-LM) family of large language models to the [tinygrad](https://tinygrad.org/) framework.
 
 ## Roadmap
 
