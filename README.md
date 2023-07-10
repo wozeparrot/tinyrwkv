@@ -4,7 +4,8 @@ A port of the [RWKV-LM](https://github.com/BlinkDL/RWKV-LM) family of large lang
 
 ## Roadmap
 
-- [ ] Implement the WKV kernel as a custom function
+- [x] Implement the WKV kernel as a custom function
+- [ ] Implement the backwards of the WKV kernel as a custom function
 - [ ] Optimize more
 - [ ] Add support for the world model and tokenizer
 
@@ -55,7 +56,8 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
-  --seed SEED           seed for random```
+  --seed SEED           seed for random
+```
 
 ## License
 
