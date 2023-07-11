@@ -18,7 +18,7 @@ pub extern "C" fn tk_from_file(file: *const libc::c_char) -> *mut libc::c_void {
 #[no_mangle]
 pub extern "C" fn tk_free(tokenizer: *mut libc::c_void) {
     if !tokenizer.is_null() {
-        unsafe { Box::from_raw(tokenizer as *mut Tokenizer) };
+        unsafe { drop(Box::from_raw(tokenizer as *mut Tokenizer)) };
     }
 }
 
