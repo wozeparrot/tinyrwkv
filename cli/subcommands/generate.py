@@ -5,9 +5,11 @@ import numpy as np
 
 from argparse import Namespace, _SubParsersAction, ArgumentParser
 import gc
+import json
 
 from tinyrwkv import RWKV_RNN
 from tinyrwkv.utils.sampling import sample_logits
+from tinyrwkv.tokenizer import Tokenizer as WorldTokenizer
 
 
 def generate_parser(subparsers: "_SubParsersAction[ArgumentParser]") -> None:
@@ -62,13 +64,15 @@ def generate(args: Namespace) -> None:
     Tensor.no_grad = True
 
     # load tokenizer
-    tokenizer = Tokenizer.from_file(args.tokenizer_path)
+    with open(args.model_path + ".json", "r") as f:
+        use_world_tokenizer = json.load(f).get("world", False)
+    tokenizer = Tokenizer.from_file(args.tokenizer_path) if not use_world_tokenizer else WorldTokenizer()
 
     # load model
     model = RWKV_RNN(args.model_path)
     assert (
-        model.vocab_size == tokenizer.get_vocab_size()
-    ), "vocab size mismatch (are you using the correct tokenizer?)"
+        model.vocab_size == tokenizer.get_vocab_size() or use_world_tokenizer # world tokenizer models are padded
+    ), f"vocab size mismatch (are you using the correct tokenizer?), model: {model.vocab_size}, tokenizer: {tokenizer.get_vocab_size()}"
 
     # encode initial context
     initial_context = (
@@ -82,20 +86,20 @@ def generate(args: Namespace) -> None:
         embed = model.index_embed(encoded_inital_context[i])
         the_input = model.build_input(embed, state)
         out = model.forward(the_input)
-        state = out[50277:]
+        state = out[model.vocab_size:]
     last_token = encoded_inital_context[-1]
 
     print(f"\n{initial_context}", end="", flush=True)
 
     gc.collect()
 
-    alpha_counter = np.zeros(50277)
+    alpha_counter = np.zeros(model.vocab_size, dtype=np.float32)
     while True:
         embed = model.index_embed(int(last_token))
         the_input = model.build_input(embed, state)
         the_output = model.forward(the_input)
-        logits = the_output[:50277]
-        state = the_output[50277:]
+        logits = the_output[:model.vocab_size]
+        state = the_output[model.vocab_size:]
         # logits to cpu
         logits = logits.cpu().numpy()
 

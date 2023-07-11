@@ -25,6 +25,12 @@ def generate_parser(subparsers: "_SubParsersAction[ArgumentParser]") -> None:
         default="float",
         help="data type to use (default: float)",
     )
+    parser.add_argument(
+        "--world",
+        help="use the world tokenizer (default: False)",
+        default=False,
+        action="store_true",
+    )
     parser.set_defaults(func=preprocess)
 
 
@@ -92,6 +98,7 @@ def preprocess(args: Namespace) -> None:
         "embed_size": weights["emb.weight"].shape[1],
         "layers": sum("ln1.weight" in k for k in weights.keys()),
         "dtype": args.dtype,
+        "world": args.world,
     }
     with open(args.output_path + ".json", "w") as f:
         json.dump(info, f)
