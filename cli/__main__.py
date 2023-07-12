@@ -58,8 +58,9 @@ def main() -> None:
     test_wkv.generate_parser(subparsers)
 
     args = parser.parse_args()
-    np.random.seed(args.seed)
-    Tensor.manual_seed(args.seed)
+    if args.seed != 0:
+        np.random.seed(args.seed)
+        Tensor.manual_seed(args.seed)
 
     args.func(args)
 
