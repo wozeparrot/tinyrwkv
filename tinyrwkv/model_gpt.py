@@ -95,8 +95,8 @@ class TimeMix:
         self.receptance = nn.Linear(embed_size, embed_size, bias=False)
         self.value = nn.Linear(embed_size, embed_size, bias=False)
 
-        # self.wkv = ConvWKV()
-        self.wkv = OpenCLWKV()
+        self.wkv = ConvWKV()
+        # self.wkv = OpenCLWKV()
 
         self.output = nn.Linear(embed_size, embed_size, bias=False)
 
