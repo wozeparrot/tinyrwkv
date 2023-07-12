@@ -261,14 +261,14 @@ class RWKV_RNN:
     def init_state(self) -> Tensor:
         states = []
         for _ in range(self.layers):
-            states.append(
-                Tensor.cat(
+            states.extend(
+                [
                     Tensor([0.0] * self.embed_size),
                     Tensor([0.0] * self.embed_size),
                     Tensor([0.0] * self.embed_size),
                     Tensor([-1e30] * self.embed_size),
                     Tensor([0.0] * self.embed_size),
-                )
+                ]
             )
         return Tensor.cat(*states).realize()
 
@@ -303,11 +303,9 @@ class RWKV_RNN:
                 state[state_pp_xx:state_end],
             )
 
-            new_state.append(Tensor.cat(att_xx, att_aa, att_bb, att_pp, ffn_xx))
+            new_state.extend([att_xx, att_aa, att_bb, att_pp, ffn_xx])
 
         x = x.layernorm().linear(self.ln_out_weight, self.ln_out_bias)
         x = x @ self.head.T
 
-        state = Tensor.cat(*new_state)
-
-        return Tensor.cat(x, state).realize()
+        return Tensor.cat(x, *new_state).realize()
