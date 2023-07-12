@@ -33,7 +33,7 @@ def benchmark(args: Namespace) -> None:
         embed = model.index_embed(int(last_token))
         the_input = model.build_input(embed, state)
         the_output = model.forward(the_input)
-        state = the_output[50277:]
+        state = the_output[model.vocab_size:]
 
     last_token = 510
     state = model.init_state()
@@ -44,7 +44,7 @@ def benchmark(args: Namespace) -> None:
         embed = model.index_embed(int(last_token))
         the_input = model.build_input(embed, state)
         the_output = model.forward(the_input)
-        state = the_output[50277:]
+        state = the_output[model.vocab_size:]
     end = time.time()
     diff = end - now
     print(f"1000 tokens in {diff:.2f}s")

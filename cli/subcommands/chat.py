@@ -85,11 +85,11 @@ Alice: Of course! I'm glad to answer your questions or give helpful advices. You
         embed = model.index_embed(encoded_inital_context[i])
         the_input = model.build_input(embed, state)
         out = model.forward(the_input)
-        state = out[50277:]
+        state = out[model.vocab_size:]
 
     gc.collect()
 
-    alpha_counter = np.zeros(50277)
+    alpha_counter = np.zeros(model.vocab_size)
     while True:
         user_input = input("> ")
         if user_input == "":
@@ -100,7 +100,7 @@ Alice: Of course! I'm glad to answer your questions or give helpful advices. You
             embed = model.index_embed(encoded_user_input[i])
             the_input = model.build_input(embed, state)
             out = model.forward(the_input)
-            state = out[50277:]
+            state = out[model.vocab_size:]
         last_token = encoded_user_input[-1]
 
         print("$", end="", flush=True)
@@ -109,8 +109,8 @@ Alice: Of course! I'm glad to answer your questions or give helpful advices. You
             embed = model.index_embed(int(last_token))
             the_input = model.build_input(embed, state)
             the_output = model.forward(the_input)
-            logits = the_output[:50277]
-            state = the_output[50277:]
+            logits = the_output[:model.vocab_size]
+            state = the_output[model.vocab_size:]
             # logits to cpu
             logits = logits.cpu().numpy()
 
