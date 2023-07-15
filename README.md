@@ -7,6 +7,7 @@ A port of the [RWKV-LM](https://github.com/BlinkDL/RWKV-LM) family of large lang
 - [x] Implement the WKV kernel as a custom function
 - [ ] Implement the backwards of the WKV kernel as a custom function
 - [x] Add support for the world model and tokenizer
+- [ ] Add support for the MIDI models
 
 ## Dependencies
 
