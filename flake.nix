@@ -63,6 +63,7 @@
                 torch
                 tqdm
                 wandb
+                mido
               ];
             llvmPackages = pkgs.llvmPackages_15;
             python = pkgs.python310;

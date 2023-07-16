@@ -16,6 +16,7 @@ from .subcommands import (
     train,
     benchmark_gpt,
     test_wkv,
+    music,
 )
 
 
@@ -56,6 +57,9 @@ def main() -> None:
 
     # test wkv subcommand
     test_wkv.generate_parser(subparsers)
+
+    # music subcommand
+    music.generate_parser(subparsers)
 
     args = parser.parse_args()
     if args.seed != 0:
