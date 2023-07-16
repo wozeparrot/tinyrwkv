@@ -21,7 +21,7 @@ def generate_parser(subparsers: "_SubParsersAction[ArgumentParser]") -> None:
         "--tokenizer_path",
         help="path to the tokenizer file",
         type=str,
-        default="tokenizer.json",
+        default="tinyrwkv/vocab/tokenizer.json",
     )
     parser.add_argument(
         "--model_path", help="path to the weights file", type=str, required=True
