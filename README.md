@@ -21,7 +21,7 @@ tinygrad
 tokenizers
 torch (only for loading pytorch weights)
 tqdm
-wandb
+wandb (optional during training)
 ```
 
 ### System
@@ -38,12 +38,12 @@ Run the CLI with `python -m cli`.
 Also, usable as a python package to embed in other projects. It's also possible to compile the model to portable C code and embed it that way.
 
 ```
-usage: tinyrwkv-cli [-h] [--seed SEED] {pre,gen,cht,cmp,bch,ptr,gpt,tra,bpt} ...
+usage: tinyrwkv-cli [-h] [--seed SEED] {pre,gen,cht,cmp,bch,ptr,gpt,tra,bpt,wkv,mus} ...
 
 CLI for tinyrwkv
 
 positional arguments:
-  {pre,gen,cht,cmp,bch,ptr,gpt,tra,bpt}
+  {pre,gen,cht,cmp,bch,ptr,gpt,tra,bpt,wkv,mus}
     pre                 preprocess either tinyrwkv trained weights or pytorch trained weights into RNN form
     gen                 freeform generation using the RNN mode (requires a preprocessed model using `pre`)
     cht                 chat with a model in RNN mode (requires a preprocessed model using `pre`)
@@ -53,6 +53,8 @@ positional arguments:
     gpt                 freeform generation using the GPT mode (requires a preprocessed model using `ptr`)
     tra                 pretrain or finetune a model (if finetuning the model needs to be preprocessed with `ptr`)
     bpt                 benchmark the gpt mode
+    wkv                 benchmark/test each wkv module
+    mus                 music generation using the RNN mode (requires a preprocessed model using `pre`)
 
 options:
   -h, --help            show this help message and exit
