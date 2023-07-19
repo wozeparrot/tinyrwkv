@@ -45,7 +45,6 @@ def compile(args: Namespace) -> None:
     embed = Tensor(model.index_embed(0).numpy())
     state = model.init_state()
     the_input = model.build_input(embed, state)
-
     the_output = model.forward(the_input)
     the_output = model.forward(the_input)
 

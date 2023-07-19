@@ -1,11 +1,10 @@
+from tinygrad.state import safe_save, safe_load
 from tinygrad.tensor import Tensor
 from tqdm import tqdm
 import numpy as np
 
 from argparse import Namespace, _SubParsersAction, ArgumentParser
-import gc
 import json
-import pickle
 
 
 def generate_parser(subparsers: "_SubParsersAction[ArgumentParser]") -> None:
@@ -26,10 +25,10 @@ def generate_parser(subparsers: "_SubParsersAction[ArgumentParser]") -> None:
         help="data type to use (default: float)",
     )
     parser.add_argument(
-        "--world",
-        help="use the world tokenizer (default: False)",
-        default=False,
-        action="store_true",
+        "--model_type",
+        help="the type of model to use (default: world)",
+        choices=["20b", "world", "midi"],
+        default="world",
     )
     parser.set_defaults(func=preprocess)
 
@@ -38,31 +37,27 @@ def preprocess(args: Namespace) -> None:
     if args.input_path.endswith(".pth"):
         import torch
 
-        weights = torch.load(args.input_path, map_location="cpu")
-    elif args.input_path.endswith(".pkl"):
-        with open(args.input_path, "rb") as f:
-            weights = pickle.load(f)
+        weights_t = torch.load(args.input_path, map_location="cpu")
+    elif args.input_path.endswith(".safetensors"):
+        weights_t = safe_load(args.input_path)
     else:
         raise Exception("Unknown file type")
 
-    # convert all weights to numpy
+    # convert all weights to tinygrad
+    weights = {}
     print("Converting weights to numpy...")
-    for k, v in tqdm(weights.items()):
-        if isinstance(v, np.ndarray):
-            v = v.astype(np.float32)
+    for k, v in tqdm(weights_t.items()):
+        if isinstance(v, Tensor):
+            weights[k] = v.float().realize()
         else:
-            v = v.float().numpy()
-        weights[k] = v
+            weights[k] = Tensor(v.float().numpy())
 
     # precompute ln0 with emb.weight
     print("Precomputing emb.weight with ln0...")
     weights["emb.weight"] = (
-        Tensor(weights["emb.weight"])
+        weights["emb.weight"]
         .layernorm()
-        .linear(
-            Tensor(weights["blocks.0.ln0.weight"]), Tensor(weights["blocks.0.ln0.bias"])
-        )
-        .numpy()
+        .linear(weights["blocks.0.ln0.weight"], weights["blocks.0.ln0.bias"])
     )
     del weights["blocks.0.ln0.weight"]
     del weights["blocks.0.ln0.bias"]
@@ -71,9 +66,9 @@ def preprocess(args: Namespace) -> None:
     print("Refining weights...")
     for k, v in tqdm(weights.items()):
         if ".time_" in k:
-            v = v.squeeze()
+            v = v.squeeze().realize()
         if ".time_decay" in k:
-            v = -np.exp(v)
+            v = -v.exp().realize()
 
         # convert to correct dtype
         if (
@@ -82,15 +77,14 @@ def preprocess(args: Namespace) -> None:
             and ".time_first" not in k
             and "emb.weight" not in k
         ):
-            v = v.astype(np.float16)
+            v = v.half()
         else:
-            v = v.astype(np.float32)
+            v = v.float()
 
-        weights[k] = v
+        weights[k] = v.realize()
 
     print("Writing weights...")
-    with open(args.output_path, "wb") as f:
-        pickle.dump(weights, f)
+    safe_save(weights, args.output_path)
 
     print("Writing info...")
     info = {
@@ -98,7 +92,7 @@ def preprocess(args: Namespace) -> None:
         "embed_size": weights["emb.weight"].shape[1],
         "layers": sum("ln1.weight" in k for k in weights.keys()),
         "dtype": args.dtype,
-        "world": args.world,
+        "model_type": args.model_type,
     }
     with open(args.output_path + ".json", "w") as f:
         json.dump(info, f)

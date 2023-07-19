@@ -1,8 +1,8 @@
+from tinygrad.state import safe_save
 from tqdm import tqdm
 import torch
 
 import json
-import pickle
 from argparse import Namespace, _SubParsersAction, ArgumentParser
 
 
@@ -28,8 +28,7 @@ def preprocess(args: Namespace) -> None:
         weights[k] = v.float().numpy()
 
     print("Writing weights...")
-    with open(args.output_path, "wb") as f:
-        pickle.dump(weights, f)
+    safe_save(weights, args.output_path)
 
     print("Writing info...")
     info = {

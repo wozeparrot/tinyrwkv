@@ -9,10 +9,12 @@ build/
 *.so
 
 # ignore model weights
+weights/
 *.pth
 *.pkl
 *.pkl.json
 *.bin
+*.safetensors
 
 # ignore training data
 *.npy

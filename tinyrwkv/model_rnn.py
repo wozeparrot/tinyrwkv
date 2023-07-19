@@ -1,4 +1,5 @@
-from tinygrad.tensor import Tensor
+from tinygrad.state import load_state_dict, safe_load
+from tinygrad.tensor import Device, Tensor
 from tinygrad.jit import TinyJit
 import tinygrad.nn as nn
 from tqdm import tqdm
@@ -217,11 +218,12 @@ class RWKV_RNN:
         self.embed_size = info["embed_size"]
         self.layers = info["layers"]
         self.dtype = info["dtype"]
+        self.model_type = info["model_type"]
 
-        with open(path, "rb") as f:
-            weights = pickle.load(f)
-        for k, v in tqdm(weights.items()):
-            weights[k] = Tensor(v)
+        # load weights
+        weights = safe_load(path)
+        for k, v in weights.items():
+            weights[k] = v.to(Device.DEFAULT).realize()
 
         self.emb = weights["emb.weight"]
 

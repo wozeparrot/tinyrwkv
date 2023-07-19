@@ -1,3 +1,4 @@
+from tinygrad.state import safe_load
 from tinygrad.tensor import Tensor
 from tqdm import tqdm
 from typing import Callable, cast
@@ -6,10 +7,9 @@ import tinygrad.nn as nn
 
 import json
 import math
-import pickle
 
 from utils.misc import get_child
-from wkv import WKV, ConvWKV, OpenCLWKV
+from wkv import WKV, ConvWKV
 
 
 class ChannelMix:
@@ -96,7 +96,6 @@ class TimeMix:
         self.value = nn.Linear(embed_size, embed_size, bias=False)
 
         self.wkv = ConvWKV()
-        # self.wkv = OpenCLWKV()
 
         self.output = nn.Linear(embed_size, embed_size, bias=False)
 
@@ -181,25 +180,21 @@ class RWKV_GPT:
         self.head = nn.Linear(self.embed_size, self.vocab_size, bias=False)
 
         # load weights
-        with open(path, "rb") as f:
-            weights = pickle.load(f)
+        weights = safe_load(path)
+        for k, v in tqdm(weights.items()):
+            if "ln0" in k:
+                if "weight" in k:
+                    cast(Tensor, self.ln0.weight).assign(v)
+                elif "bias" in k:
+                    cast(Tensor, self.ln0.bias).assign(v)
 
-            for k, v in tqdm(weights.items()):
-                if "ln0" in k:
-                    if "weight" in k:
-                        cast(Tensor, self.ln0.weight).assign(v)
-                    elif "bias" in k:
-                        cast(Tensor, self.ln0.bias).assign(v)
-
-                try:
-                    w = cast(Tensor, get_child(self, k))
-                except:
-                    w = None
-                if w is not None:
-                    assert w.shape == v.shape
-                    w.assign(v)
-
-            del weights
+            try:
+                w = cast(Tensor, get_child(self, k))
+            except:
+                w = None
+            if w is not None:
+                assert w.shape == v.shape
+                w.assign(v)
 
     def forward(self, idx: Tensor) -> Tensor:
         x = self.emb(idx)
