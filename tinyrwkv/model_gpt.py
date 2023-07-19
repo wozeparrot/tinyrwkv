@@ -1,3 +1,4 @@
+from tinygrad.lazy import Device
 from tinygrad.state import safe_load
 from tinygrad.tensor import Tensor
 from tqdm import tqdm
@@ -181,6 +182,9 @@ class RWKV_GPT:
 
         # load weights
         weights = safe_load(path)
+        for k, v in weights.items():
+            weights[k] = v.to(Device.DEFAULT).realize()
+
         for k, v in tqdm(weights.items()):
             if "ln0" in k:
                 if "weight" in k:
