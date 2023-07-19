@@ -1,13 +1,12 @@
-from tinygrad.state import load_state_dict, safe_load
-from tinygrad.tensor import Device, Tensor
 from tinygrad.jit import TinyJit
+from tinygrad.lazy import Device
+from tinygrad.state import safe_load
+from tinygrad.tensor import Tensor
 import tinygrad.nn as nn
-from tqdm import tqdm
 
 from typing import cast
 import gc
 import json
-import pickle
 
 
 class Att:

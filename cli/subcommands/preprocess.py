@@ -1,7 +1,6 @@
 from tinygrad.state import safe_save, safe_load
 from tinygrad.tensor import Tensor
 from tqdm import tqdm
-import numpy as np
 
 from argparse import Namespace, _SubParsersAction, ArgumentParser
 import json
