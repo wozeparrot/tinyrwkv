@@ -57,7 +57,7 @@ def compile(args: Namespace) -> None:
     if not os.path.exists(args.output_path):
         os.mkdir(args.output_path)
 
-    # copy the tokenizer
+    # copy the tokenizer vocab
     shutil.copy(args.tokenizer_path, args.output_path)
 
     # copy the main.c file

@@ -2,7 +2,6 @@ from tinygrad.state import get_parameters
 
 
 def compile_net(run, special_names):
-    # functions that run the net
     functions = {}
     bufs = {}
     bufnum = 0
@@ -41,6 +40,31 @@ def compile_net(run, special_names):
                 )
 
         statements.append(f"{fxn.name}({', '.join(cargs)});")
+
+    return functions, statements, bufs, bufs_to_save
+
+
+def compile_net_js(run, special_names):
+    functions = {}
+    bufs = {}
+    bufs_to_save = {}
+    statements = []
+    bufnum = 0
+    for fxn, args in run.jit_cache:
+        functions[fxn.name] = fxn.prg
+        cargs = []
+        for i, arg in enumerate(args):
+            key = id(arg)
+            if key not in bufs:
+                if key in special_names:
+                    bufs[key] = (special_names[key], arg._memsz, key)
+                else:
+                    bufs[key] = (f"buf_{bufnum}", arg._memsz, key)
+                    bufnum += 1
+                    if i > 0:
+                        bufs_to_save[bufs[key][0]] = arg
+            cargs.append(bufs[key][0])
+        statements.append((fxn.name, cargs, fxn.global_size))
 
     return functions, statements, bufs, bufs_to_save
 
