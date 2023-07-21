@@ -98,11 +98,11 @@
     "tinygrad": {
       "flake": false,
       "locked": {
-        "lastModified": 1689897450,
-        "narHash": "sha256-ltv5YtHuxarekyuRuQjNzm/VVBvWBJBIvxeHlQMgSwM=",
+        "lastModified": 1689907987,
+        "narHash": "sha256-/FVrA5+uxo+Ez9XHblCSYKXMjrDCUXdLKh7TLMtkjrQ=",
         "owner": "geohot",
         "repo": "tinygrad",
-        "rev": "d963024a1310a13db65bc417fcb627ff0c483bc3",
+        "rev": "f45013f0a3abbcbe46c28d3e30ef25b3f2d45e27",
         "type": "github"
       },
       "original": {
