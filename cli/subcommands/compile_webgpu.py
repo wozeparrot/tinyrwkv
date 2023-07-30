@@ -4,7 +4,7 @@ from argparse import Namespace, _SubParsersAction, ArgumentParser
 import os
 import shutil
 
-from tinyrwkv import RWKV_RNN
+from tinyrwkv.v4 import RWKV_RNN
 from tinyrwkv.utils.model import compile_net_js
 
 

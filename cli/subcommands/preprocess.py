@@ -29,6 +29,12 @@ def generate_parser(subparsers: "_SubParsersAction[ArgumentParser]") -> None:
         choices=["20b", "world", "midi"],
         default="world",
     )
+    parser.add_argument(
+        "--version",
+        help="the version of the model to use (default: v4)",
+        choices=["v4", "v5"],
+        default="v4",
+    )
     parser.set_defaults(func=preprocess)
 
 
@@ -92,6 +98,7 @@ def preprocess(args: Namespace) -> None:
         "layers": sum("ln1.weight" in k for k in weights.keys()),
         "dtype": args.dtype,
         "model_type": args.model_type,
+        "version": args.version,
     }
     with open(args.output_path + ".json", "w") as f:
         json.dump(info, f)

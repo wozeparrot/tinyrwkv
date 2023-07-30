@@ -9,7 +9,7 @@ from argparse import Namespace, _SubParsersAction, ArgumentParser
 import gc
 import pathlib
 
-from tinyrwkv import RWKV_RNN
+from tinyrwkv.v4 import RWKV_RNN
 from tinyrwkv.utils.sampling import sample_logits
 
 

@@ -7,7 +7,7 @@ from argparse import Namespace, _SubParsersAction, ArgumentParser
 import gc
 import pickle
 
-from tinyrwkv import RWKV_GPT
+from tinyrwkv.v4 import RWKV_GPT
 from tinyrwkv.utils.misc import get_child
 from tinyrwkv.utils.model import count_parameters
 from tinyrwkv.utils.sampling import sample_logits

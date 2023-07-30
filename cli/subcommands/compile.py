@@ -6,7 +6,7 @@ import os
 import shutil
 import subprocess
 
-from tinyrwkv import RWKV_RNN
+from tinyrwkv.v4 import RWKV_RNN
 from tinyrwkv.utils.model import compile_net
 
 

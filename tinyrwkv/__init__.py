@@ -1,4 +1,3 @@
-from model_gpt import RWKV_GPT
-from model_rnn import RWKV_RNN
+import v4
 
-__all__ = ["RWKV_GPT", "RWKV_RNN"]
+__all__ = ["v4"]

@@ -5,7 +5,7 @@ from tqdm import tqdm, trange
 from argparse import Namespace, _SubParsersAction, ArgumentParser
 import time
 
-from tinyrwkv import RWKV_RNN
+from tinyrwkv.v4 import RWKV_RNN
 
 
 def generate_parser(subparsers: "_SubParsersAction[ArgumentParser]") -> None:

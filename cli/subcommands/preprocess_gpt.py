@@ -36,6 +36,8 @@ def preprocess(args: Namespace) -> None:
         "embed_size": weights["emb.weight"].shape[1],
         "layers": sum("ln1.weight" in k for k in weights.keys()),
         "dtype": "float",
+        "model_type": "20b",
+        "version": "v4",
     }
     with open(args.output_path + ".json", "w") as f:
         json.dump(info, f)

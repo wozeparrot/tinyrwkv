@@ -1,8 +1,6 @@
 from tinygrad.tensor import Tensor
-from tqdm import tqdm, trange
 
 from argparse import Namespace, _SubParsersAction, ArgumentParser
-import time
 
 from tinyrwkv.wkv import OpenCLWKV, StdWKV, ConvWKV
 
