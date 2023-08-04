@@ -53,9 +53,9 @@ def preprocess(args: Namespace) -> None:
     print("Converting weights to numpy...")
     for k, v in tqdm(weights_t.items()):
         if isinstance(v, Tensor):
-            weights[k] = v.float().realize()
+            weights[k] = v.to("cpu").float().realize()
         else:
-            weights[k] = Tensor(v.float().numpy())
+            weights[k] = Tensor(v.float().numpy(), device="cpu")
 
     # precompute ln0 with emb.weight
     print("Precomputing emb.weight with ln0...")
