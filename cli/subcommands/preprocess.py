@@ -73,7 +73,13 @@ def preprocess(args: Namespace) -> None:
         if ".time_" in k:
             v = v.squeeze().realize()
         if ".time_decay" in k:
-            v = -v.exp().realize()
+            if args.version == "v4":
+                v = -v.exp().realize()
+            elif args.version == "v5":
+                v = (-v.exp()).exp().unsqueeze(-1).unsqueeze(-1).realize()
+        if ".time_first" in k:
+            if args.version == "v5":
+                v = v.exp().unsqueeze(-1).unsqueeze(-1).realize()
 
         # convert to correct dtype
         if (
@@ -100,5 +106,8 @@ def preprocess(args: Namespace) -> None:
         "model_type": args.model_type,
         "version": args.version,
     }
+    if args.version == "v5":
+        info["n_heads"] = weights["blocks.0.att.time_decay"].shape[0]
+        info["head_dim"] = weights["blocks.0.ln1.weight"].shape[0] // info["n_heads"]
     with open(args.output_path + ".json", "w") as f:
         json.dump(info, f)

@@ -5,8 +5,8 @@ import numpy as np
 
 from argparse import Namespace, _SubParsersAction, ArgumentParser
 import gc
+import json
 
-from tinyrwkv.v4 import RWKV_RNN
 from tinyrwkv.utils.sampling import sample_logits
 from tinyrwkv.tokenizer import Tokenizer as WorldTokenizer
 
@@ -61,6 +61,16 @@ def generate_parser(subparsers: "_SubParsersAction[ArgumentParser]") -> None:
 
 def generate(args: Namespace) -> None:
     Tensor.no_grad = True
+
+    # get model version
+    with open(args.model_path + ".json", "r") as f:
+        version = json.load(f)["version"]
+    if version == "v4":
+        from tinyrwkv.v4 import RWKV_RNN
+    elif version == "v5":
+        from tinyrwkv.v5 import RWKV_RNN
+    else:
+        raise RuntimeError("Unknown model version")
 
     # load model
     model = RWKV_RNN(args.model_path)

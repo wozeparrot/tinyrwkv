@@ -10,6 +10,8 @@ import json
 
 
 class Att:
+    n_heads: int
+    head_dim: int
     time_mix_k: Tensor
     time_mix_v: Tensor
     time_mix_r: Tensor
@@ -22,6 +24,8 @@ class Att:
 
     def __init__(
         self,
+        n_heads: int,
+        head_dim: int,
         time_mix_k: Tensor,
         time_mix_v: Tensor,
         time_mix_r: Tensor,
@@ -30,8 +34,12 @@ class Att:
         receptance: Tensor,
         time_first: Tensor,
         time_decay: Tensor,
+        gn_weight: Tensor,
+        gn_bias: Tensor,
         output: Tensor,
     ):
+        self.n_heads = n_heads
+        self.head_dim = head_dim
         self.time_mix_k = time_mix_k
         self.time_mix_v = time_mix_v
         self.time_mix_r = time_mix_r
@@ -42,38 +50,34 @@ class Att:
         self.time_decay = time_decay
         self.output = output
 
+        self.output_group_norm = nn.GroupNorm(self.n_heads, self.head_dim)
+        self.output_group_norm.weight = gn_weight
+        self.output_group_norm.bias = gn_bias
+
     def __call__(
-        self, x: Tensor, att_xx, att_aa, att_bb, att_pp
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        self,
+        x: Tensor,
+        att_xx,
+        att_ss,
+    ) -> tuple[Tensor, Tensor, Tensor]:
         xk = self.time_mix_k * (x - att_xx) + att_xx
         xv = self.time_mix_v * (x - att_xx) + att_xx
         xr = self.time_mix_r * (x - att_xx) + att_xx
 
-        k = xk @ self.key.T
-        v = xv @ self.value.T
-        r = (xr @ self.receptance.T).sigmoid()
+        k = (self.key @ xk).reshape(self.n_heads, self.head_dim, 1)
+        v = (self.value @ xv).reshape(self.n_heads, 1, self.head_dim)
+        r = (self.receptance @ xr).reshape(self.n_heads, 1, self.head_dim)
 
-        # calculate output
-        ww = k + self.time_first
-        p = att_pp.maximum(ww)
-        e1 = (att_pp - p).exp()
-        e2 = (ww - p).exp()
-        a = (e1 * att_aa) + (e2 * v)
-        b = (e1 * att_bb) + e2
-        rwkv = r * (a / b)
+        ss = att_ss.reshape(self.n_heads, self.head_dim, self.head_dim)
 
-        # update state
-        ww = att_pp + self.time_decay
-        p = ww.maximum(k)
-        e1 = (ww - p).exp()
-        e2 = (k - p).exp()
+        a = k @ v
+        o = r @ (self.time_first * a + ss)
+        o = self.output_group_norm(o.flatten().unsqueeze(0)).squeeze(0)
 
         return (
-            rwkv @ self.output.T,
+            self.output @ o,
             x,
-            ((e1 * att_aa) + (e2 * v)),
-            ((e1 * att_bb) + e2),
-            p,
+            (a + self.time_decay * ss).flatten(),
         )
 
 
@@ -102,9 +106,9 @@ class Ffn:
         xk = self.time_mix_k * (x - ffn_xx) + ffn_xx
         xr = self.time_mix_r * (x - ffn_xx) + ffn_xx
 
-        k = (xk @ self.key.T).relu().square()
-        kv = k @ self.value.T
-        r = (xr @ self.receptance.T).sigmoid()
+        k = (self.key @ xk).relu().square()
+        kv = self.value @ k
+        r = (self.receptance @ xr).sigmoid()
         rkv = r * kv
 
         return rkv, x
@@ -121,6 +125,8 @@ class Block:
     def __init__(
         self,
         embed_size: int,
+        n_heads: int,
+        head_dim: int,
         att_ln_weight: Tensor,
         att_ln_bias: Tensor,
         att_time_mix_k: Tensor,
@@ -131,6 +137,8 @@ class Block:
         att_receptance: Tensor,
         att_time_first: Tensor,
         att_time_decay: Tensor,
+        att_gn_weight: Tensor,
+        att_gn_bias: Tensor,
         att_output: Tensor,
         ffn_ln_weight: Tensor,
         ffn_ln_bias: Tensor,
@@ -146,6 +154,8 @@ class Block:
         cast(Tensor, self.att_ln.weight).assign(att_ln_weight)
         cast(Tensor, self.att_ln.bias).assign(att_ln_bias)
         self.att = Att(
+            n_heads,
+            head_dim,
             att_time_mix_k,
             att_time_mix_v,
             att_time_mix_r,
@@ -154,6 +164,8 @@ class Block:
             att_receptance,
             att_time_first,
             att_time_decay,
+            att_gn_weight,
+            att_gn_bias,
             att_output,
         )
 
@@ -172,15 +184,11 @@ class Block:
         self,
         x: Tensor,
         att_xx: Tensor,
-        att_aa: Tensor,
-        att_bb: Tensor,
-        att_pp: Tensor,
+        att_ss: Tensor,
         ffn_xx: Tensor,
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         ln1 = self.att_ln(x)
-        att, att_xx, att_aa, att_bb, att_pp = self.att(
-            ln1, att_xx, att_aa, att_bb, att_pp
-        )
+        att, att_xx, att_ss = self.att(ln1, att_xx, att_ss)
         x = x + att
         ln2 = self.ffn_ln(x)
         ffn, ffn_xx = self.ffn(ln2, ffn_xx)
@@ -189,9 +197,7 @@ class Block:
         return (
             x,
             att_xx.realize(),
-            att_aa.realize(),
-            att_bb.realize(),
-            att_pp.realize(),
+            att_ss.realize(),
             ffn_xx.realize(),
         )
 
@@ -199,6 +205,8 @@ class Block:
 class RWKV_RNN:
     vocab_size: int
     embed_size: int
+    n_heads: int
+    head_dim: int
     layers: int
     dtype: str
     model_type: str
@@ -213,10 +221,12 @@ class RWKV_RNN:
         # load info file
         with open(path + ".json", "r") as f:
             info = json.load(f)
-        assert info["version"] == "v4", "model version mismatch"
+        assert info["version"] == "v5", "model version mismatch"
 
         self.vocab_size = info["vocab_size"]
         self.embed_size = info["embed_size"]
+        self.n_heads = info["n_heads"]
+        self.head_dim = info["head_dim"]
         self.layers = info["layers"]
         self.dtype = info["dtype"]
         self.model_type = info["model_type"]
@@ -233,6 +243,8 @@ class RWKV_RNN:
             self.blocks.append(
                 Block(
                     self.embed_size,
+                    self.n_heads,
+                    self.head_dim,
                     weights[f"blocks.{i}.ln1.weight"],
                     weights[f"blocks.{i}.ln1.bias"],
                     weights[f"blocks.{i}.att.time_mix_k"],
@@ -243,6 +255,8 @@ class RWKV_RNN:
                     weights[f"blocks.{i}.att.receptance.weight"],
                     weights[f"blocks.{i}.att.time_first"],
                     weights[f"blocks.{i}.att.time_decay"],
+                    weights[f"blocks.{i}.att.ln_x.weight"],
+                    weights[f"blocks.{i}.att.ln_x.bias"],
                     weights[f"blocks.{i}.att.output.weight"],
                     weights[f"blocks.{i}.ln2.weight"],
                     weights[f"blocks.{i}.ln2.bias"],
@@ -267,11 +281,8 @@ class RWKV_RNN:
             states.extend(
                 [
                     Tensor([0.0] * self.embed_size),
-                    Tensor([0.0] * self.embed_size),
-                    Tensor([0.0] * self.embed_size),
-                    Tensor([-1e30] * self.embed_size),
-                    Tensor([0.0] * self.embed_size),
                 ]
+                * (2 + self.head_dim)
             )
         return Tensor.cat(*states).realize()
 
@@ -291,24 +302,20 @@ class RWKV_RNN:
 
         new_state = []
         for i, block in enumerate(self.blocks):
-            state_index = i * 5 * self.embed_size
-            state_xx_aa = state_index + 1 * self.embed_size
-            state_aa_bb = state_index + 2 * self.embed_size
-            state_bb_pp = state_index + 3 * self.embed_size
-            state_pp_xx = state_index + 4 * self.embed_size
-            state_end = state_index + 5 * self.embed_size
-            x, att_xx, att_aa, att_bb, att_pp, ffn_xx = block(
+            state_index = i * (2 + self.head_dim) * self.embed_size
+            state_xx_ss = state_index + 1 * self.embed_size
+            state_ss_xx = state_index + (1 + self.head_dim) * self.embed_size
+            state_end = state_index + (2 + self.head_dim) * self.embed_size
+            x, att_xx, att_ss, ffn_xx = block(
                 x,
-                state[state_index:state_xx_aa],
-                state[state_xx_aa:state_aa_bb],
-                state[state_aa_bb:state_bb_pp],
-                state[state_bb_pp:state_pp_xx],
-                state[state_pp_xx:state_end],
+                state[state_index:state_xx_ss],
+                state[state_xx_ss:state_ss_xx],
+                state[state_ss_xx:state_end],
             )
 
-            new_state.extend([att_xx, att_aa, att_bb, att_pp, ffn_xx])
+            new_state.extend([att_xx, att_ss, ffn_xx])
 
         x = x.layernorm().linear(self.ln_out_weight, self.ln_out_bias)
-        x = x @ self.head.T
+        x = self.head @ x
 
         return Tensor.cat(x, *new_state).realize()
