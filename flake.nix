@@ -74,6 +74,47 @@
                     cffi
                   ];
                 };
+                Py-BOBYQA = p.buildPythonPackage rec {
+                  pname = "Py-BOBYQA";
+                  version = "1.4";
+                  src = pkgs.fetchFromGitHub {
+                    owner = "numericalalgorithmsgroup";
+                    repo = "pybobyqa";
+                    rev = "v${version}";
+                    sha256 = "sha256-wrDmLZW3Cv6/LQgcJ4qaG4RX60C/cj5/BkiojkEqEyo=";
+                  };
+                  doCheck = false;
+                  propagatedBuildInputs = with p; [
+                    ax
+                    bayesian-optimization
+                    cma
+                    numpy
+                    pandas
+                    scipy
+                    typing-extensions
+                  ];
+                };
+                nevergrad = p.buildPythonPackage rec {
+                  pname = "nevergrad";
+                  version = "0.11.0";
+                  src = pkgs.fetchFromGitHub {
+                    owner = "facebookresearch";
+                    repo = pname;
+                    rev = version;
+                    sha256 = "sha256-wrDmLZW3Cv6/LQgcJ4qaG4RX60C/cj5/BkiojkEqEyo=";
+                  };
+                  doCheck = false;
+                  propagatedBuildInputs = with p; [
+                    Py-BOBYQA
+                    ax
+                    bayesian-optimization
+                    cma
+                    numpy
+                    pandas
+                    scipy
+                    typing-extensions
+                  ];
+                };
                 tinygrad = p.buildPythonPackage {
                   pname = "tinygrad";
                   version = inputs.tinygrad.shortRev;
@@ -81,6 +122,7 @@
                   doCheck = false;
                   propagatedBuildInputs = with p; [
                     networkx
+                    nevergrad
                     numpy
                     pillow
                     pyopencl
