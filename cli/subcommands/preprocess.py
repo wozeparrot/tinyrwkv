@@ -1,3 +1,4 @@
+from tinygrad.lazy import Device
 from tinygrad.state import safe_save, safe_load
 from tinygrad.tensor import Tensor
 from tqdm import tqdm
@@ -53,9 +54,9 @@ def preprocess(args: Namespace) -> None:
     print("Converting weights to numpy...")
     for k, v in tqdm(weights_t.items()):
         if isinstance(v, Tensor):
-            weights[k] = v.to("cpu").float().realize()
+            weights[k] = v.to(Device.DEFAULT).float().realize()
         else:
-            weights[k] = Tensor(v.float().numpy(), device="cpu")
+            weights[k] = Tensor(v.float().numpy())
 
     # precompute ln0 with emb.weight
     print("Precomputing emb.weight with ln0...")
