@@ -142,11 +142,11 @@
                   tokenizers
                   torch
                   tqdm
-                  wandb
+                  # wandb
                   wgpu-py
                 ];
               llvmPackages = pkgs.llvmPackages_15;
-              python = pkgs.python310;
+              python = pkgs.python311;
             in
               with pkgs; [
                 (python.withPackages python-packages)
