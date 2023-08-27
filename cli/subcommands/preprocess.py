@@ -1,5 +1,5 @@
 from tinygrad.lazy import Device
-from tinygrad.state import safe_save, safe_load
+from tinygrad.nn.state import safe_save, safe_load
 from tinygrad.tensor import Tensor
 from tqdm import tqdm
 

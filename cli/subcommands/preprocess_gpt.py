@@ -1,4 +1,4 @@
-from tinygrad.state import safe_save
+from tinygrad.nn.state import safe_save
 from tqdm import tqdm
 import torch
 

@@ -1,6 +1,6 @@
 from tinygrad.jit import TinyJit
 from tinygrad.lazy import Device
-from tinygrad.state import safe_load
+from tinygrad.nn.state import safe_load
 from tinygrad.tensor import Tensor
 import tinygrad.nn as nn
 

@@ -5,8 +5,8 @@ import numpy as np
 
 from argparse import Namespace, _SubParsersAction, ArgumentParser
 import gc
+import json
 
-from tinyrwkv.v4 import RWKV_RNN
 from tinyrwkv.utils.sampling import sample_logits
 from tinyrwkv.tokenizer import Tokenizer as WorldTokenizer
 
@@ -26,11 +26,11 @@ def generate_parser(subparsers: "_SubParsersAction[ArgumentParser]") -> None:
         "--model_path", help="path to the weights file", type=str, required=True
     )
     parser.add_argument(
-        "--temperature", help="temperature (default: 1.1)", type=float, default=1.1
+        "--temperature", help="temperature (default: 0.8)", type=float, default=0.8
     )
     parser.add_argument("--top_k", help="topk (default: 35)", type=int, default=35)
     parser.add_argument(
-        "--typical_tau", help="typical tau (default: 0.2)", type=float, default=0.2
+        "--typical_tau", help="typical tau (default: 0.9)", type=float, default=0.9
     )
     parser.add_argument(
         "--alpha_presence",
@@ -50,6 +50,16 @@ def generate_parser(subparsers: "_SubParsersAction[ArgumentParser]") -> None:
 def chat(args: Namespace) -> None:
     Tensor.no_grad = True
 
+    # get model version
+    with open(args.model_path + ".json", "r") as f:
+        version = json.load(f)["version"]
+    if version == "v4":
+        from tinyrwkv.v4 import RWKV_RNN
+    elif version == "v5":
+        from tinyrwkv.v5 import RWKV_RNN
+    else:
+        raise RuntimeError("Unknown model version")
+
     # load model
     model = RWKV_RNN(args.model_path)
 
@@ -68,24 +78,19 @@ def chat(args: Namespace) -> None:
 
     # encode initial context
     initial_context = """
-The following is a coherent, verbose, and detailed conversation between a girl named Alice and her friend Bob. Alice is very intelligent, creative and friendly. Alice is unlikely to disagree with Bob, and Alice doesn't like to ask Bob questions. Alice likes to tell Bob a lot about herself and her opinions. Alice usually gives Bob kind, helpful and informative advice.
+The following is a conversation between a user and Pippa Pipkin, a rabbit virtual youtuber from Phase Connect. Pippa is quirky, super energetic, paranoid. She loves to mess with people and tell puns and stupid jokes.
 
-Bob: Hello Alice, how are you doing?
+User: hello, who are you?
 
-Alice: Hi! Thanks, I'm fine. What about you?
+Pippa: whats up! i'm pippa, a rabbit vtuber from phase connect.
 
-Bob: I am fine. It's nice to see you. Look! Here is a store that is selling tea and juice. Would you like to go inside and have a drink?
+User: that's pretty cool, wanna hear a joke?
 
-Alice: Sure! Let's go inside. I would like to have some mocha latte, which is my favourite!
+Pippa: no, how about you shut the fuck up?
 
-Bob: What is it?
+User: whoa, how about we just restart this conversation.
 
-Alice: Mocha latte is usually made with espresso, milk, chocolate, and frothed milk. Its flavors are frequently sweet.
-
-Bob: Sounds tasty. I'll try it next time. Would you like to chat with me for a while?
-
-Alice: Of course! I'm glad to answer your questions or give helpful advices. You know, I am confident with my expertise. So please go ahead!
-"""
+Pippa: sure, i'm pippa, what do you want?"""
     encoded_inital_context = tokenizer.encode(initial_context).ids
 
     state = model.init_state()
@@ -99,10 +104,11 @@ Alice: Of course! I'm glad to answer your questions or give helpful advices. You
 
     alpha_counter = np.zeros(model.vocab_size)
     while True:
+        print("\n\n", end="", flush=True)
         user_input = input("> ")
         if user_input == "":
             break
-        user_input = "\nBob: " + user_input.strip() + "\nAlice:"
+        user_input = f"\n\nUser: {user_input.strip()}\n\nPippa:"
         encoded_user_input = tokenizer.encode(user_input).ids
         for i in range(len(encoded_user_input) - 1):
             embed = model.index_embed(encoded_user_input[i])
@@ -118,7 +124,6 @@ Alice: Of course! I'm glad to answer your questions or give helpful advices. You
             the_input = model.build_input(embed, state)
             the_output = model.forward(the_input)
             logits = the_output[: model.vocab_size]
-            state = the_output[model.vocab_size :]
             # logits to cpu
             logits = logits.cpu().numpy()
 
@@ -146,8 +151,13 @@ Alice: Of course! I'm glad to answer your questions or give helpful advices. You
             last_token = sampled
             decoded = tokenizer.decode([sampled])
             output += decoded
-            print(decoded, end="", flush=True)
 
             # break on double newline
-            if "\n\n" in output:
+            if "\n" in output:
                 break
+            elif "User" in output:
+                break
+            else:
+                # update state
+                state = the_output[model.vocab_size :]
+                print(decoded, end="", flush=True)

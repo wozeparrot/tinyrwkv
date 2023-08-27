@@ -1,4 +1,4 @@
-from tinygrad.state import get_parameters
+from tinygrad.nn.state import get_parameters
 
 
 def compile_net(run, special_names):
