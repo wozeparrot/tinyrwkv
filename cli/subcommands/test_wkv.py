@@ -2,7 +2,7 @@ from tinygrad.tensor import Tensor
 
 from argparse import Namespace, _SubParsersAction, ArgumentParser
 
-from tinyrwkv.wkv import OpenCLWKV, StdWKV, ConvWKV
+from tinyrwkv.wkv import StdWKV, ConvWKV
 
 
 def generate_parser(subparsers: "_SubParsersAction[ArgumentParser]") -> None:
@@ -39,8 +39,8 @@ def test_wkv(args: Namespace) -> None:
 
     f1 = StdWKV()(B, T, C, u1, w1, k1, v1)
 
-    # l1 = ((f1 * f1) - f1.tanh()).sum()
-    # l1.backward()
+    l1 = ((f1 * f1) - f1.tanh()).sum()
+    l1.backward()
 
     u2 = Tensor.zeros(C, requires_grad=True) + u0
     w2 = Tensor.zeros(C, requires_grad=True) + w0
@@ -52,22 +52,6 @@ def test_wkv(args: Namespace) -> None:
 
     l2 = ((f2 * f2) - f2.tanh()).sum()
     l2.backward()
-
-    u3 = Tensor.zeros(C, requires_grad=True) + u0
-    w3 = Tensor.zeros(C, requires_grad=True) + w0
-    k3 = Tensor.zeros(B, T, C, requires_grad=True) + k0
-    v3 = Tensor.zeros(B, T, C, requires_grad=True) + v0
-
-    f3 = OpenCLWKV()(B, T, C, u3, w3, k3, v3)
-    print(f"OpenCLWKV error: {get_error(f1, f3)}")
-
-    l3 = ((f3 * f3) - f3.tanh()).sum()
-    l3.backward()
-
-    print(f"gu error: {get_error(u2.grad, u3.grad)}")
-    print(f"gw error: {get_error(w2.grad, w3.grad)}")
-    print(f"gk error: {get_error(k2.grad, k3.grad)}")
-    print(f"gv error: {get_error(v2.grad, v3.grad)}")
 
     # now = time.time()
     # for _ in trange(20):

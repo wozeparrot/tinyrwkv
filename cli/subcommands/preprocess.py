@@ -1,6 +1,5 @@
-from tinygrad.lazy import Device
 from tinygrad.nn.state import safe_save, safe_load
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, Device
 from tqdm import tqdm
 
 from argparse import Namespace, _SubParsersAction, ArgumentParser
