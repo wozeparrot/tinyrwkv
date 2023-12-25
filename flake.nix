@@ -1,10 +1,9 @@
 {
-  description = "";
+  description = "tinyrwkv: tiny implementation of RWKV in tinygrad";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-
     tinygrad.url = "github:wozeparrot/tinygrad-nix";
   };
 
@@ -29,27 +28,14 @@
               with p; [
                 tinygrad
                 llvmlite
-                mido
-                mypy
-                numpy
-                pydot
                 tokenizers
                 torch
-                tqdm
-                wandb
               ];
-            llvmPackages = pkgs.llvmPackages_15;
             python = pkgs.python311;
           in
             with pkgs; [
               (python.withPackages python-packages)
-              cargo
-              llvmPackages.clang
-              llvmPackages.libunwind
-              clinfo
-
-              # needed for GRAPH=1 to work
-              graphviz
+              llvmPackages_latest.clang
             ];
         };
       }
