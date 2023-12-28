@@ -26,8 +26,9 @@
           packages = let
             python-packages = p:
               with p; [
-                tinygrad
                 llvmlite
+                pydot
+                tinygrad
                 tokenizers
                 torch
               ];
@@ -35,6 +36,7 @@
           in
             with pkgs; [
               (python.withPackages python-packages)
+              graphviz
               llvmPackages_latest.clang
             ];
         };
