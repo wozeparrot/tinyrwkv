@@ -1,3 +1,3 @@
-from .model_rnn import RWKV_RNN
+from .model import Model
 
-__all__ = ["RWKV_RNN"]
+__all__ = ["Model"]
