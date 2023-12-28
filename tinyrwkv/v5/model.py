@@ -1,5 +1,5 @@
 import math
-from tinygrad import nn, Tensor, TinyJit
+from tinygrad import dtypes, nn, Tensor, TinyJit
 
 class Model:
   def __init__(self, n_blocks, dim, n_vocab, n_heads, dropout=0.01):
@@ -17,7 +17,7 @@ class Model:
   def init_state(self, bs: int) -> Tensor:
     return Tensor.cat(*[
       Tensor.zeros(bs, 1, self.dim, requires_grad=False),
-      Tensor.zeros(bs, 1, self.n_heads * self.dim // self.n_heads * self.dim // self.n_heads, requires_grad=False),
+      Tensor.zeros(bs, 1, self.n_heads * self.dim // self.n_heads * self.dim // self.n_heads, dtype=dtypes.float32, requires_grad=False),
       Tensor.zeros(bs, 1, self.dim, requires_grad=False)
     ] * self.n_blocks, dim=2)
 
