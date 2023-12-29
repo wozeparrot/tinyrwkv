@@ -1,3 +1,3 @@
-from .model import Model
+from .model import Model, Int8Linear, NF4Linear
 
-__all__ = ["Model"]
+__all__ = ["Model", "Int8Linear", "NF4Linear"]

@@ -2,14 +2,14 @@ import math
 from tinygrad import dtypes, nn, Tensor, TinyJit
 
 class Model:
-  def __init__(self, n_blocks, dim, n_vocab, n_heads, dropout=0.01):
-    self.n_blocks, self.dim, self.n_heads, self.dropout = n_blocks, dim, n_heads, dropout
+  def __init__(self, n_blocks, dim, n_vocab, n_heads, *, rescale=6, dropout=0.01, linear=nn.Linear):
+    self.n_blocks, self.dim, self.n_heads, self.rescale, self.dropout = n_blocks, dim, n_heads, rescale, dropout
     self.state_size = dim + n_heads * dim // n_heads * dim // n_heads + dim
 
     self.emb = nn.Embedding(n_vocab, dim)
     self.emb_norm = nn.LayerNorm(dim)
 
-    self.blocks = [Block(dim, n_heads, dropout) for _ in range(n_blocks)]
+    self.blocks = [Block(dim, n_heads, dropout=dropout, linear=linear) for _ in range(n_blocks)]
 
     self.ln_out = nn.LayerNorm(dim)
     self.head = nn.Linear(dim, n_vocab, bias=False)
@@ -31,6 +31,7 @@ class Model:
       cm_state = state[:, :, i*self.state_size+self.dim+self.n_heads * self.dim // self.n_heads * self.dim // self.n_heads:i*self.state_size+self.state_size]
       x, tm_state, kv_state, cm_state = block(x, [tm_state, kv_state, cm_state])
       new_state += [tm_state, kv_state, cm_state]
+      if self.rescale != 0 and (i + 1) % self.rescale == 0: x = x / 2
     logits = self.head(self.ln_out(x))[:, -1, :]
     new_state = Tensor.cat(*new_state, dim=2)
 
@@ -47,14 +48,14 @@ class Model:
     return self.head(self.ln_out(x)).realize()
 
 class Block:
-  def __init__(self, dim, n_heads, dropout=0.01):
+  def __init__(self, dim, n_heads, *, dropout=0.01, linear=nn.Linear):
     self.dropout = dropout
 
     self.ln1 = nn.LayerNorm(dim)
     self.ln2 = nn.LayerNorm(dim)
 
-    self.att = TimeMix(dim, n_heads)
-    self.ffn = ChannelMix(dim)
+    self.att = TimeMix(dim, n_heads, linear=linear)
+    self.ffn = ChannelMix(dim, linear=linear)
 
   def __call__(self, x, state):
     tm, tm_state, kv_state = self.att(self.ln1(x), state[0:2])
@@ -66,7 +67,7 @@ class Block:
     return (x + self.ffn.forward(self.ln2(x))).dropout(self.dropout)
 
 class TimeMix:
-  def __init__(self, dim, n_heads):
+  def __init__(self, dim, n_heads, *, linear=nn.Linear):
     self.n_heads = n_heads
 
     self.time_mix_k = Tensor.kaiming_uniform(1, 1, dim, a=math.sqrt(5))
@@ -77,11 +78,11 @@ class TimeMix:
     self.time_decay = Tensor.ones(n_heads, dim // n_heads)
     self.time_faaaa = Tensor.zeros(n_heads, dim // n_heads)
 
-    self.receptance = nn.Linear(dim, dim, bias=False)
-    self.key = nn.Linear(dim, dim, bias=False)
-    self.value = nn.Linear(dim, dim, bias=False)
-    self.output = nn.Linear(dim, dim, bias=False)
-    self.gate = nn.Linear(dim, dim, bias=False)
+    self.receptance = linear(dim, dim, bias=False)
+    self.key = linear(dim, dim, bias=False)
+    self.value = linear(dim, dim, bias=False)
+    self.output = linear(dim, dim, bias=False)
+    self.gate = linear(dim, dim, bias=False)
     self.ln_x = nn.GroupNorm(n_heads, dim, eps=64e-5)
 
   @staticmethod
@@ -121,13 +122,13 @@ class TimeMix:
   def forward(self, x): return self(x, None)
 
 class ChannelMix:
-  def __init__(self, dim):
+  def __init__(self, dim, *, linear=nn.Linear):
     self.time_mix_k = Tensor.kaiming_uniform(1, 1, dim, a=math.sqrt(5))
     self.time_mix_r = Tensor.kaiming_uniform(1, 1, dim, a=math.sqrt(5))
 
-    self.receptance = nn.Linear(dim, dim, bias=False)
-    self.key = nn.Linear(dim, int(dim * 3.5), bias=False)
-    self.value = nn.Linear(int(dim * 3.5), dim, bias=False)
+    self.receptance = linear(dim, dim, bias=False)
+    self.key = linear(dim, int(dim * 3.5), bias=False)
+    self.value = linear(int(dim * 3.5), dim, bias=False)
 
   def __call__(self, x, state):
     # token shift
@@ -144,3 +145,56 @@ class ChannelMix:
 
     return out if state is None else (out, x)
   def forward(self, x): return self(x, None)
+
+class Int8Linear:
+  def __init__(self, in_features, out_features, bias=False):
+    assert not bias, "bias not supported"
+    self.weight = Tensor.empty(out_features, in_features, dtype=dtypes.int8)
+    self.scale = Tensor.empty(out_features, dtype=dtypes.float16)
+  def __call__(self, x: Tensor) -> Tensor: return x.linear(self.weight.cast(dtypes.float16).T * self.scale)
+
+  @staticmethod
+  def quantize(state_dict: dict[str, Tensor]) -> dict[str, Tensor]:
+    new_state_dict = {}
+    for k, v in state_dict.items():
+      if ".key" in k or ".value" in k or ".receptance" in k or ".gate" in k or ".output" in k or ".value" in k:
+        v = v.to("CLANG")
+        scale = (v.abs().max(axis=1) / 127.0).cast(dtypes.float16)
+        new_state_dict[k] = (v.T / scale).T.cast(dtypes.int8)
+        new_state_dict[k.replace(".weight", ".scale")] = scale
+      else:
+        new_state_dict[k] = v
+    return new_state_dict
+
+def NF4Linear(block_size):
+  CODE = Tensor([
+    -1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453, -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0,
+    0.07958029955625534, 0.16093020141124725, 0.24611230194568634, 0.33791524171829224, 0.44070982933044434, 0.5626170039176941, 0.7229568362236023, 1.0,
+  ], dtype=dtypes.float32)
+  class _NF4Linear:
+    def __init__(self, in_features, out_features, bias=False):
+      assert not bias, "bias not supported"
+      self.in_features, self.out_features = in_features, out_features
+      self.weight = Tensor.empty(int(out_features * in_features / 2), dtype=dtypes.uint8)
+      self.scale = Tensor.empty(int(out_features * in_features / block_size), 1, dtype=dtypes.float32)
+
+    def __call__(self, x: Tensor) -> Tensor:
+      high_bits, low_bits = self.weight / 2 ** 4, (self.weight * 2 ** 4).contiguous() / 2 ** 4
+      unpacked = Tensor.stack([high_bits, low_bits], dim=-1).flatten()
+      unscaled = CODE[unpacked].reshape(-1, block_size) * self.scale
+      return x.linear(unscaled.reshape(self.out_features, self.in_features).T)
+
+    @staticmethod
+    def quantize(state_dict: dict[str, Tensor]) -> dict[str, Tensor]:
+      new_state_dict = {}
+      for k, v in state_dict.items():
+        if ".key" in k or ".value" in k or ".receptance" in k or ".gate" in k or ".output" in k or ".value" in k:
+          grouped = v.to(CODE.device).reshape(-1, block_size)
+          scale = (grouped.abs().max(axis=1, keepdim=True))
+          coded = ((grouped / scale).unsqueeze(-1) - CODE).abs().argmin(axis=-1).cast(dtypes.uint8).flatten()
+          new_state_dict[k] = coded[::2] * 2 ** 4 + coded[1::2]
+          new_state_dict[k.replace(".weight", ".scale")] = scale.cast(dtypes.float32)
+        else:
+          new_state_dict[k] = v
+      return new_state_dict
+  return _NF4Linear
