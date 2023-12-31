@@ -41,11 +41,10 @@ class Model:
     probs = logits.softmax()
     return probs.multinomial().realize(), new_state.realize()
 
-  @TinyJit
   def forward(self, x: Tensor) -> Tensor:
     x = self.emb_norm(self.emb(x)).dropout(self.dropout)
     for block in self.blocks: x = block.forward(x)
-    return self.head(self.ln_out(x)).realize()
+    return self.head(self.ln_out(x))
 
 class Block:
   def __init__(self, dim, n_heads, *, dropout=0.01, linear=nn.Linear):
@@ -89,7 +88,7 @@ class TimeMix:
   def wkv(r, k, v, u, w, kv_state):
     y = kv_state + (kv := k @ v) * u
     kv_state = kv_state * w + kv
-    return (r @ y)[:, :, 0], kv_state
+    return (r @ y)[:, :, 0], kv_state.detach().realize() # TODO: remove the realize
 
   def __call__(self, x, state):
     # token shift
