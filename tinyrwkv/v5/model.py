@@ -88,7 +88,7 @@ class TimeMix:
   def wkv(r, k, v, u, w, kv_state):
     y = kv_state + (kv := k @ v) * u
     kv_state = kv_state * w + kv
-    return (r @ y)[:, :, 0], kv_state.detach().realize() # TODO: remove the realize
+    return (r @ y)[:, :, 0], kv_state.realize() # TODO: remove the realize
 
   def __call__(self, x, state):
     # token shift
