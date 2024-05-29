@@ -67,15 +67,15 @@ class Block:
 
 class TimeMix:
   def __init__(self, dim, n_heads, *, linear:Callable=nn.Linear):
-    self.n_heads = n_heads
+    self.n_heads, self.head_dim = n_heads, dim // n_heads
 
     self.time_mix_k = Tensor.kaiming_uniform(1, 1, dim, a=math.sqrt(5))
     self.time_mix_v = Tensor.kaiming_uniform(1, 1, dim, a=math.sqrt(5))
     self.time_mix_r = Tensor.kaiming_uniform(1, 1, dim, a=math.sqrt(5))
     self.time_mix_g = Tensor.kaiming_uniform(1, 1, dim, a=math.sqrt(5))
 
-    self.time_decay = Tensor.ones(n_heads, dim // n_heads)
-    self.time_faaaa = Tensor.zeros(n_heads, dim // n_heads)
+    self.time_decay = Tensor.ones(n_heads, self.head_dim)
+    self.time_faaaa = Tensor.zeros(n_heads, self.head_dim)
 
     self.receptance = linear(dim, dim, bias=False)
     self.key = linear(dim, dim, bias=False)
@@ -86,35 +86,36 @@ class TimeMix:
 
   @staticmethod
   def wkv(r:Tensor, k:Tensor, v:Tensor, u:Tensor, w:Tensor, kv_state:Tensor):
-    y = kv_state + (kv := k @ v) * u
-    kv_state = kv_state * w + kv
+    y = kv_state + (kv := k.transpose(-2, -1) @ v) * u.transpose(-2, -1)
+    kv_state = kv_state * w.transpose(-2, -1) + kv
     return (r @ y)[:, :, 0], kv_state
 
-  def __call__(self, x:Tensor, state:Tensor):
+  def __call__(self, x:Tensor, state:Tensor | None):
     # token shift
     xx = x.pad((None, (0, 1), None)).shrink((None, (1, x.shape[1] + 1), None)) if state is None else state[0]
     xr, xk, xv, xg = x.lerp(xx, self.time_mix_r), x.lerp(xx, self.time_mix_k), x.lerp(xx, self.time_mix_v), x.lerp(xx, self.time_mix_g)
 
     # projection
     r, k, v = self.receptance(xr), self.key(xk), self.value(xv)
-    (B, T, C), H = x.shape, self.n_heads
-    r, k, v = r.reshape(B, T, H, 1, C // H), k.reshape(B, T, H, C // H, 1), v.reshape(B, T, H, 1, C // H)
+    (B, T, C), H, X = x.shape, self.n_heads, self.head_dim
+    r, k, v = r.reshape(B, T, H, X), k.reshape(B, T, H, X), v.reshape(B, T, H, X)
+    r, k, v = r.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
 
     # force the decay to be 0 to 1
-    w = self.time_decay.exp().neg().exp().unsqueeze(-1)
-    u = self.time_faaaa.unsqueeze(-1)
+    w = self.time_decay.exp().neg().exp().reshape(1, H, 1, X)
+    u = self.time_faaaa.reshape(1, H, 1, X)
 
     # wkv for each timestep
-    out, kv_state = [], Tensor.zeros(B, H, C // H, C // H) if state is None else state[1].reshape(B, H, C // H, C // H)
+    out, kv_state = [], Tensor.zeros(B, H, X, X, dtype=x.dtype, device=x.device) if state is None else state[1].reshape(B, H, X, X)
     for i in range(T):
-      ou, kv_state = TimeMix.wkv(r[:, i], k[:, i], v[:, i], u, w, kv_state)
+      ou, kv_state = TimeMix.wkv(r[..., i:i+1, :], k[..., i:i+1, :], v[..., i:i+1, :], u, w, kv_state)
       out.append(ou)
     out = out[0].cat(*out[1:], dim=1) if T > 1 else out[0]
 
     # project and gate
     out = self.ln_x(out.reshape(B * T, C)).reshape(B, T, C)
     out = self.output(out * self.gate(xg).silu())
-    return out if state is None else (out, x, kv_state.reshape(B, 1, H * C // H * C // H))
+    return out if state is None else (out, x, kv_state.reshape(B, 1, H * X * X))
   def forward(self, x): return self(x, None)
 
 class ChannelMix:
@@ -126,7 +127,7 @@ class ChannelMix:
     self.key = linear(dim, int(dim * 3.5), bias=False)
     self.value = linear(int(dim * 3.5), dim, bias=False)
 
-  def __call__(self, x:Tensor, state:Tensor):
+  def __call__(self, x:Tensor, state:Tensor | None):
     # token shift
     xx = x.pad((None, (0, 1), None)).shrink((None, (1, x.shape[1] + 1), None)) if state is None else state[0]
     xk = x.lerp(xx, self.time_mix_k)
