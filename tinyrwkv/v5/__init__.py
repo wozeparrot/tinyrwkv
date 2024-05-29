@@ -85,7 +85,7 @@ class TimeMix:
     self.ln_x = nn.GroupNorm(n_heads, dim, eps=64e-5)
 
   @staticmethod
-  def wkv(r, k, v, u, w, kv_state):
+  def wkv(r:Tensor, k:Tensor, v:Tensor, u:Tensor, w:Tensor, kv_state:Tensor):
     y = kv_state + (kv := k @ v) * u
     kv_state = kv_state * w + kv
     return (r @ y)[:, :, 0], kv_state
@@ -93,10 +93,7 @@ class TimeMix:
   def __call__(self, x:Tensor, state:Tensor):
     # token shift
     xx = x.pad((None, (0, 1), None)).shrink((None, (1, x.shape[1] + 1), None)) if state is None else state[0]
-    xk = x * self.time_mix_k + xx * (1 - self.time_mix_k)
-    xv = x * self.time_mix_v + xx * (1 - self.time_mix_v)
-    xr = x * self.time_mix_r + xx * (1 - self.time_mix_r)
-    xg = x * self.time_mix_g + xx * (1 - self.time_mix_g)
+    xr, xk, xv, xg = x.lerp(xx, self.time_mix_r), x.lerp(xx, self.time_mix_k), x.lerp(xx, self.time_mix_v), x.lerp(xx, self.time_mix_g)
 
     # projection
     r, k, v = self.receptance(xr), self.key(xk), self.value(xv)
@@ -132,8 +129,8 @@ class ChannelMix:
   def __call__(self, x:Tensor, state:Tensor):
     # token shift
     xx = x.pad((None, (0, 1), None)).shrink((None, (1, x.shape[1] + 1), None)) if state is None else state[0]
-    xk = x * self.time_mix_k + xx * (1 - self.time_mix_k)
-    xr = x * self.time_mix_r + xx * (1 - self.time_mix_r)
+    xk = x.lerp(xx, self.time_mix_k)
+    xr = x.lerp(xx, self.time_mix_r)
 
     # projection and activation
     k = self.key(xk).relu().square()
