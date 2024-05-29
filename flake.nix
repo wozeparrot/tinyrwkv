@@ -26,18 +26,14 @@
           packages = let
             python-packages = p:
               with p; [
-                llvmlite
-                pydot
-                tinygrad
-                tokenizers
-                torch
+                (tinygrad.override {
+                  rocmSupport = true;
+                })
               ];
-            python = pkgs.python311;
+            python = pkgs.python312;
           in
             with pkgs; [
               (python.withPackages python-packages)
-              graphviz
-              llvmPackages_latest.clang
             ];
         };
       }

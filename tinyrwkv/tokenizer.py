@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import NamedTuple
 
 with open(Path(__file__).parent / "vocab" / "world.txt", "r") as f:
   VOCAB = f.readlines()
