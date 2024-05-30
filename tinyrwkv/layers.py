@@ -4,7 +4,7 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.tensor import Function
 
 class Int8Linear:
-  def __init__(self, in_features, out_features, bias=False):
+  def __init__(self, in_features: int, out_features: int, bias=False):
     assert not bias, "bias not supported"
     self.weight = Tensor.empty(out_features, in_features, dtype=dtypes.int8)
     self.scale = Tensor.empty(out_features, dtype=dtypes.float16)
@@ -29,7 +29,7 @@ def NF4Linear(block_size):
     0.07958029955625534, 0.16093020141124725, 0.24611230194568634, 0.33791524171829224, 0.44070982933044434, 0.5626170039176941, 0.7229568362236023, 1.0,
   ], dtype=dtypes.float32)
   class _NF4Linear:
-    def __init__(self, in_features, out_features, bias=False):
+    def __init__(self, in_features: int, out_features: int, bias=False):
       assert not bias, "bias not supported"
       self.in_features, self.out_features = in_features, out_features
       self.weight = Tensor.empty(int(out_features * in_features / 2), dtype=dtypes.uint8)
