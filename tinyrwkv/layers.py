@@ -1,7 +1,4 @@
-from tinygrad import dtypes, Tensor
-from tinygrad.helpers import prod
-from tinygrad.lazy import LazyBuffer
-from tinygrad.tensor import Function
+from tinygrad import dtypes, Tensor, nn
 
 class Int8Linear:
   def __init__(self, in_features: int, out_features: int, bias=False):
@@ -55,3 +52,15 @@ def NF4Linear(block_size):
           new_state_dict[k] = v
       return new_state_dict
   return _NF4Linear
+
+class LayerNorm(nn.LayerNorm):
+  def __init__(self, dim:int, eps=1e-5, affine=True): super().__init__(dim, eps, affine)
+  def __call__(self, x:Tensor) -> Tensor:
+    if dtypes.default_float != dtypes.bfloat16: return super().__call__(x.float()).cast(dtypes.default_float)
+    else: return super().__call__(x)
+
+class GroupNorm(nn.GroupNorm):
+  def __init__(self, num_groups:int, num_channels:int, eps=1e-5, affine=True): super().__init__(num_groups, num_channels, eps, affine)
+  def __call__(self, x:Tensor) -> Tensor:
+    if dtypes.default_float != dtypes.bfloat16: return super().__call__(x.float()).cast(dtypes.default_float)
+    else: return super().__call__(x)

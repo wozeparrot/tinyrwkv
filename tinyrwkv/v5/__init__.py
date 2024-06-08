@@ -4,6 +4,7 @@ from tinygrad import dtypes, nn, Tensor, TinyJit
 from tinygrad.helpers import round_up
 
 from ..utils import sample
+from ..layers import LayerNorm, GroupNorm
 
 class Model:
   def __init__(self, n_blocks, dim, n_vocab, n_heads, *, rescale=6, dropout=0.01, linear:Callable=nn.Linear):
@@ -11,11 +12,11 @@ class Model:
     self.state_size = dim + n_heads * self.head_dim * self.head_dim + dim
 
     self.emb = nn.Embedding(n_vocab, dim)
-    self.emb_norm = nn.LayerNorm(dim)
+    self.emb_norm = LayerNorm(dim)
 
     self.blocks = [Block(dim, n_heads, dropout=dropout, linear=linear) for _ in range(n_blocks)]
 
-    self.ln_out = nn.LayerNorm(dim)
+    self.ln_out = LayerNorm(dim)
     self.head = nn.Linear(dim, n_vocab, bias=False)
 
   def init_state(self, bs: int) -> Tensor:
@@ -53,8 +54,8 @@ class Block:
   def __init__(self, dim, n_heads, *, dropout=0.01, linear:Callable=nn.Linear):
     self.dropout = dropout
 
-    self.ln1 = nn.LayerNorm(dim)
-    self.ln2 = nn.LayerNorm(dim)
+    self.ln1 = LayerNorm(dim)
+    self.ln2 = LayerNorm(dim)
 
     self.att = TimeMix(dim, n_heads, linear=linear)
     self.ffn = ChannelMix(dim, linear=linear)
@@ -85,20 +86,21 @@ class TimeMix:
     self.value = linear(dim, dim, bias=False)
     self.output = linear(dim, dim, bias=False)
     self.gate = linear(dim, dim, bias=False)
-    self.ln_x = nn.GroupNorm(n_heads, dim, eps=64e-5)
+    self.ln_x = GroupNorm(n_heads, dim, eps=64e-5)
 
   @staticmethod
   def wkv(r:Tensor, k:Tensor, v:Tensor, u:Tensor, w:Tensor, kv_state:Tensor):
     (B, H, T, X), C = r.shape, 32
     if T % C != 0: C = 1
+    N = T // C
 
     if T == 1:
       y = kv_state + (kv := k.transpose(-2, -1) @ v) * u.transpose(-2, -1)
       kv_state = kv_state * w.transpose(-2, -1) + kv
       return r @ y, kv_state
     else:
-      w_log = w.log()
-      wc_log = w_log.reshape(-1, H, T // C, C, X)
+      w_log = w.float().log()
+      wc_log = w_log.reshape(-1, H, N, C, X)
       wc_log_cumsum = wc_log.cumsum(axis=-2)
 
       shifted_wc_log_cumsum = wc_log_cumsum.pad2d((0, 0, 1, -1))
@@ -111,14 +113,14 @@ class TimeMix:
       w_inter = w_inter.exp()
       w_intra = w_intra.exp()
 
-      r, k, v = r.reshape(B, H, T // C, C, X), k.reshape(B, H, T // C, C, X), v.reshape(B, H, T // C, C, X)
-      u = u.unsqueeze(2)
+      r, k, v = r.reshape(B, H, N, C, X), k.reshape(B, H, N, C, X), v.reshape(B, H, N, C, X)
+      u = u.unsqueeze(2).float()
 
       wc_log_offset = shifted_wc_log_cumsum[..., C//2:C//2 + 1, :]
       r_decay = (shifted_wc_log_cumsum - wc_log_offset).exp()
       k_inv_decay = (wc_log_offset - wc_log_cumsum).exp()
       a = ((r * r_decay) @ (k * k_inv_decay).transpose(-2, -1)).tril(-1)
-      out = a + Tensor.einsum("bhncx,bhncx,bhncx->bhncx", r, u * k, v)
+      out = a + Tensor.einsum("bhncx,bhncx,bhncv->bhncv", r, u * k, v)
 
       wkv = (k * w_inter).transpose(-2, -1) @ v
       wkv = list(map(lambda x: x.squeeze(-3), wkv.split(1, dim=-3)))
@@ -131,7 +133,7 @@ class TimeMix:
 
       out = out + (r * w_intra) @ states
       out = out.reshape(B, H, T, X)
-      return out, kv_state
+      return out.cast(dtypes.default_float), kv_state.cast(dtypes.default_float)
 
   def __call__(self, x:Tensor, state:Tensor | None):
     # token shift
