@@ -1,12 +1,12 @@
-import math
+import warnings
 from typing import Callable
-from tinygrad import dtypes, nn, Tensor, TinyJit
+from tinygrad import dtypes, nn, Tensor
 from tinygrad.helpers import round_up
 
 from ..utils import sample
 from ..layers import LayerNorm, GroupNorm
 
-class Model:
+class WorldModel:
   def __init__(self, n_blocks, dim, n_vocab, n_heads, *, rescale=6, dropout=0.01, linear:Callable=nn.Linear):
     self.n_blocks, self.dim, self.n_heads, self.head_dim, self.rescale, self.dropout = n_blocks, dim, n_heads, dim // n_heads, rescale, dropout
     self.state_size = dim + n_heads * self.head_dim * self.head_dim + dim
@@ -14,7 +14,7 @@ class Model:
     self.emb = nn.Embedding(n_vocab, dim)
     self.emb_norm = LayerNorm(dim)
 
-    self.blocks = [Block(dim, n_heads, dropout=dropout, linear=linear) for _ in range(n_blocks)]
+    self.blocks = [Block(i, n_blocks, dim, n_heads, dropout=dropout, linear=linear) for i in range(n_blocks)]
 
     self.ln_out = LayerNorm(dim)
     self.head = nn.Linear(dim, n_vocab, bias=False)
@@ -26,7 +26,6 @@ class Model:
       Tensor.zeros(bs, 1, self.dim, requires_grad=False)
     ] * self.n_blocks, dim=2)
 
-  @TinyJit
   def __call__(self, x: Tensor, state: Tensor, *, temperature:float=0, top_k:int=0, top_p:float=0, alpha_presence:float=0, alpha_frequency:float=0) -> tuple[Tensor, Tensor]:
     assert x.shape[0] == 1, "only batch size 1 supported"
 
@@ -51,14 +50,14 @@ class Model:
     return self.head(self.ln_out(x))
 
 class Block:
-  def __init__(self, dim, n_heads, *, dropout=0.01, linear:Callable=nn.Linear):
+  def __init__(self, i, n_blocks, dim, n_heads, *, dropout=0.01, linear:Callable=nn.Linear):
     self.dropout = dropout
 
     self.ln1 = LayerNorm(dim)
     self.ln2 = LayerNorm(dim)
 
-    self.att = TimeMix(dim, n_heads, linear=linear)
-    self.ffn = ChannelMix(dim, linear=linear)
+    self.att = TimeMix(i, n_blocks, dim, n_heads, linear=linear)
+    self.ffn = ChannelMix(i, n_blocks, dim, linear=linear)
 
   def __call__(self, x, state):
     tm, tm_state, kv_state = self.att(self.ln1(x), state[0:2])
@@ -70,28 +69,36 @@ class Block:
     return (x + self.ffn.forward(self.ln2(x))).dropout(self.dropout)
 
 class TimeMix:
-  def __init__(self, dim, n_heads, *, linear:Callable=nn.Linear):
-    self.n_heads, self.head_dim = n_heads, dim // n_heads
+  def __init__(self, i, n_blocks, dim, n_heads, *, linear:Callable=nn.Linear):
+    self.n_heads, self.head_dim, self.head_divisor = n_heads, dim // n_heads, 8
 
-    self.time_mix_k = Tensor.kaiming_uniform(1, 1, dim, a=math.sqrt(5))
-    self.time_mix_v = Tensor.kaiming_uniform(1, 1, dim, a=math.sqrt(5))
-    self.time_mix_r = Tensor.kaiming_uniform(1, 1, dim, a=math.sqrt(5))
-    self.time_mix_g = Tensor.kaiming_uniform(1, 1, dim, a=math.sqrt(5))
+    ratio_0_to_1 = i / (n_blocks - 1)
+    ratio_1_to_almost_0 = 1 - (i / n_blocks)
+    self.time_mix_k = Tensor.arange(dim).div(dim).reshape(1, 1, dim).pow(ratio_1_to_almost_0)
+    self.time_mix_v = Tensor.arange(dim).div(dim).reshape(1, 1, dim).pow(ratio_1_to_almost_0) + 0.3 * ratio_0_to_1
+    self.time_mix_r = Tensor.arange(dim).div(dim).reshape(1, 1, dim).pow(0.5 * ratio_1_to_almost_0)
+    self.time_mix_g = Tensor.arange(dim).div(dim).reshape(1, 1, dim).pow(0.5 * ratio_1_to_almost_0)
 
-    self.time_decay = Tensor.ones(n_heads, self.head_dim)
-    self.time_faaaa = Tensor.zeros(n_heads, self.head_dim)
+    self.time_decay = (-6 + 5 * Tensor.arange(dim).div(dim - 1).pow(0.7 + 1.3 * ratio_0_to_1)).reshape(n_heads, self.head_dim)
+    self.time_faaaa = Tensor([ratio_0_to_1 * (1 - (n / (dim - 1))) + (((n + 1) % 3 - 1) * 0.1) for n in range(dim)]).reshape(n_heads, self.head_dim)
 
     self.receptance = linear(dim, dim, bias=False)
     self.key = linear(dim, dim, bias=False)
     self.value = linear(dim, dim, bias=False)
     self.output = linear(dim, dim, bias=False)
     self.gate = linear(dim, dim, bias=False)
-    self.ln_x = GroupNorm(n_heads, dim, eps=64e-5)
+    self.ln_x = GroupNorm(n_heads, dim, eps=1e-5 * (self.head_divisor ** 2))
 
   @staticmethod
-  def wkv(r:Tensor, k:Tensor, v:Tensor, u:Tensor, w:Tensor, kv_state:Tensor):
-    (B, H, T, X), C = r.shape, 32
-    if T % C != 0: C = 1
+  def wkv(r:Tensor, k:Tensor, v:Tensor, u:Tensor, w:Tensor, kv_state:Tensor, C:int=32):
+    B, H, T, X = r.shape
+    if T % C != 0:
+      warnings.warn(f"T % C != 0, T={T}, C={C}, T % C={T % C}", RuntimeWarning)
+      # try to find the nearest C
+      if T % 2 != 0: C = 1
+      else:
+        while T % C != 0: C -= 2
+      warnings.warn(f"new C={C}, N={T // C}", RuntimeWarning)
     N = T // C
 
     if T == 1:
@@ -99,13 +106,13 @@ class TimeMix:
       kv_state = kv_state * w.transpose(-2, -1) + kv
       return r @ y, kv_state
     else:
-      w_log = w.float().log()
-      wc_log = w_log.reshape(-1, H, N, C, X)
+      w_log = w.maximum(0.005).float().log()
+      wc_log = w_log.reshape(w.shape[0], H, N, C, X)
       wc_log_cumsum = wc_log.cumsum(axis=-2)
 
       shifted_wc_log_cumsum = wc_log_cumsum.pad2d((0, 0, 1, -1))
 
-      ws = wc_log.sum(axis=-1, keepdim=True)
+      ws = wc_log.sum(axis=-2, keepdim=True)
       w_inter = ws - wc_log_cumsum
       w_intra = wc_log_cumsum - wc_log
 
@@ -120,7 +127,8 @@ class TimeMix:
       r_decay = (shifted_wc_log_cumsum - wc_log_offset).exp()
       k_inv_decay = (wc_log_offset - wc_log_cumsum).exp()
       a = ((r * r_decay) @ (k * k_inv_decay).transpose(-2, -1)).tril(-1)
-      out = a + Tensor.einsum("bhncx,bhncx,bhncv->bhncv", r, u * k, v)
+      a = a + diag_embed(Tensor.einsum('bhncx,bhncx->bhnc', r, u * k))
+      out = a @ v
 
       wkv = (k * w_inter).transpose(-2, -1) @ v
       wkv = list(map(lambda x: x.squeeze(-3), wkv.split(1, dim=-3)))
@@ -128,7 +136,7 @@ class TimeMix:
       states = []
       for i in range(T // C):
         states.append(kv_state)
-        kv_state = (kv_state * ws[i] + wkv[i])
+        kv_state = kv_state * ws[i] + wkv[i]
       states = Tensor.stack(*states, dim=2)
 
       out = out + (r * w_intra) @ states
@@ -137,7 +145,7 @@ class TimeMix:
 
   def __call__(self, x:Tensor, state:Tensor | None):
     # token shift
-    xx = x.pad((None, (0, 1), None)).shrink((None, (1, x.shape[1] + 1), None)) if state is None else state[0]
+    xx = x.pad((None, (1, 0), None)).shrink((None, (0, x.shape[1]), None)) if state is None else state[0]
     xr, xk, xv, xg = xx.lerp(x, self.time_mix_r), xx.lerp(x, self.time_mix_k), xx.lerp(x, self.time_mix_v), xx.lerp(x, self.time_mix_g)
 
     # projection
@@ -155,15 +163,16 @@ class TimeMix:
     out, kv_state = TimeMix.wkv(r, k, v, u, w, kv_state)
 
     # project and gate
-    out = self.ln_x(out.reshape(B * T, D)).reshape(B, T, D)
+    out = self.ln_x(out.transpose(1, 2).reshape(B * T, D).div(self.head_divisor)).reshape(B, T, D)
     out = self.output(out * self.gate(xg).silu())
     return out if state is None else (out, x, kv_state.reshape(B, 1, H * X * X))
   def forward(self, x): return self(x, None)
 
 class ChannelMix:
-  def __init__(self, dim, *, linear:Callable=nn.Linear):
-    self.time_mix_k = Tensor.kaiming_uniform(1, 1, dim, a=math.sqrt(5))
-    self.time_mix_r = Tensor.kaiming_uniform(1, 1, dim, a=math.sqrt(5))
+  def __init__(self, i, n_blocks, dim, *, linear:Callable=nn.Linear):
+    ratio_1_to_almost_0 = 1 - (i / n_blocks)
+    self.time_mix_k = Tensor.arange(dim).div(dim).reshape(1, 1, dim).pow(ratio_1_to_almost_0)
+    self.time_mix_r = Tensor.arange(dim).div(dim).reshape(1, 1, dim).pow(ratio_1_to_almost_0)
 
     self.receptance = linear(dim, dim, bias=False)
     self.key = linear(dim, round_up(int(dim * 3.5), 32), bias=False)
@@ -171,7 +180,7 @@ class ChannelMix:
 
   def __call__(self, x:Tensor, state:Tensor | None):
     # token shift
-    xx = x.pad((None, (0, 1), None)).shrink((None, (1, x.shape[1] + 1), None)) if state is None else state[0]
+    xx = x.pad((None, (1, 0), None)).shrink((None, (0, x.shape[1]), None)) if state is None else state[0]
     xr, xk = xx.lerp(x, self.time_mix_r), xx.lerp(x, self.time_mix_k)
 
     # projection and activation
@@ -183,3 +192,55 @@ class ChannelMix:
 
     return out if state is None else (out, x)
   def forward(self, x): return self(x, None)
+
+def diag_embed(x:Tensor, offset:int=0, dim1:int=-2, dim2:int=-1) -> Tensor:
+  assert offset == 0, "only offset 0 supported"
+
+  dim1 = (x.ndim + 1) + dim1 if dim1 < 0 else dim1
+  dim2 = (x.ndim + 1) + dim2 if dim2 < 0 else dim2
+
+  x = x.unsqueeze(dim1).transpose(-1, dim2)
+
+  last_dim = x.shape[-1]
+
+  # generate ranges for shifting indices based on offset
+  a_range = Tensor.arange(last_dim, device=x.device)
+  b_range = Tensor.arange(offset, last_dim + offset, device=x.device)
+
+  # broadcast
+  cond = a_range == b_range.unsqueeze(-1)
+  cond_shape = [last_dim if i in (dim1, dim2) else 1 for i in range(x.ndim)]
+  cond = cond.reshape(cond_shape)
+
+  return cond.where(x, 0)
+
+if __name__ == "__main__":
+  Tensor.manual_seed(0)
+
+  T = 32
+  B = 1
+  H = 1
+  K,V = 4,4
+  r = Tensor.rand(B,H,T,K)
+  k = Tensor.rand(B,H,T,K)
+  v = Tensor.rand(B,H,T,V)
+  w = Tensor.rand(B,H,T,K)
+  u = Tensor.rand(1,H,1,K)
+  kv_state = Tensor.zeros(B,H,K,V)
+
+  w = w.maximum(0.005)
+
+  # sequential
+  out = []
+  kv_state_ = Tensor(kv_state.numpy())
+  for t in range(T):
+    out_, kv_state_ = TimeMix.wkv(r[...,t:t+1,:], k[...,t:t+1,:], v[...,t:t+1,:], u, w[...,t:t+1,:], kv_state_)
+    out.append(out_)
+  out_s = Tensor.cat(*out, dim=-2)
+  print(out_s.numpy())
+
+  # parallel
+  out_p, _ = TimeMix.wkv(r,k,v,u,w,kv_state,C=8)
+  print(out_p.numpy())
+
+  assert (diff := (out_s - out_p).abs().max().item()) < 1e-6, f"{diff=}"
