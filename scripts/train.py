@@ -19,14 +19,14 @@ class Lion(Optimizer):
       g = t.grad
 
       update = self.ea[i] * self.b1 + g * (1 - self.b1)
-      t.assign((t.detach() * (1 - self.lr * self.wd)) + (update.sign() * (-self.lr)))
+      t.assign(((t.detach() * (1 - self.lr * self.wd)) + (update.sign() * (-self.lr))).cast(t.dtype))
       self.ea[i].assign(self.ea[i] * self.b2 + g * (1 - self.b2))
     return self.ea
 
 def z_loss(logits: Tensor): return 1e-4 * logits.logsumexp(axis=-1).mean()
 
 if __name__ == "__main__":
-  model = Model(4, 128, 65536, 4, dropout=0, rescale=0)
+  model = Model(24, 1024, 65536, 16, dropout=0, rescale=0)
   print(f"{sum(p.numel() for p in get_parameters(model)) / 1e6}M parameters")
   tokenizer = Tokenizer()
 
@@ -42,15 +42,14 @@ if __name__ == "__main__":
     optim.zero_grad()
     loss.backward()
     optim.step()
-    return loss.realize(), mloss.realize(), zloss.realize()
+    return loss.float().realize(), mloss.float().realize(), zloss.float().realize()
 
-  train_data = tokenizer.encode("hello world!")
-  print(len(train_data))
+  train_data = [0] * 1025
+  print(len(train_data[:-1]))
 
-  with Context(BEAM=2):
-    Tensor.no_grad = False
-    Tensor.training = True
-    for i in (t := tqdm(range(1000))):
-      GlobalCounters.reset()
-      loss, mloss, zloss = train_step(model, Tensor([train_data[:-1]]).expand(16, -1), Tensor([train_data[1:]]).expand(16, -1))
-      t.set_description(f"loss: {loss.item():6.6f}, mloss: {mloss.item():6.6f}, zloss: {zloss.item():6.6f}")
+  Tensor.no_grad = False
+  Tensor.training = True
+  for i in (t := tqdm(range(1000))):
+    GlobalCounters.reset()
+    loss, mloss, zloss = train_step(model, Tensor([train_data[:-1]]).expand(2, -1), Tensor([train_data[1:]]).expand(2, -1))
+    t.set_description(f"loss: {loss.item():6.6f}, mloss: {mloss.item():6.6f}, zloss: {zloss.item():6.6f}")
