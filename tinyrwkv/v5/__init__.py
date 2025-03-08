@@ -9,6 +9,16 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.engine.jit import TinyJit
 
 @dataclass
+class Config:
+  n_blocks: int
+  dim: int
+  n_vocab: int
+  n_heads: int
+  rescale: int = 0
+  dropout: float = 0.01
+  linear: Callable = nn.Linear
+
+@dataclass
 class BlockState:
   tm: Tensor
   kv: Tensor
@@ -31,23 +41,24 @@ class State:
     return self
 
 class Model:
-  def __init__(self, n_blocks, dim, n_vocab, n_heads, *, rescale=0, dropout=0.01, linear:Callable=nn.Linear):
-    self.n_blocks, self.dim, self.n_heads, self.head_dim, self.rescale, self.dropout = n_blocks, dim, n_heads, dim // n_heads, rescale, dropout
+  def __init__(self, config:Config):
+    self.config = config
+    self.head_dim = config.dim // config.n_heads
 
-    self.emb = nn.Embedding(n_vocab, dim)
-    self.emb_norm = nn.LayerNorm(dim)
+    self.emb = nn.Embedding(config.n_vocab, config.dim)
+    self.emb_norm = nn.LayerNorm(config.dim)
 
-    self.blocks = [Block(i, n_blocks, dim, n_heads, dropout=dropout, linear=linear) for i in range(n_blocks)]
+    self.blocks = [Block(i, config) for i in range(config.n_blocks)]
 
-    self.ln_out = nn.LayerNorm(dim)
-    self.head = nn.Linear(dim, n_vocab, bias=False)
+    self.ln_out = nn.LayerNorm(config.dim)
+    self.head = nn.Linear(config.dim, config.n_vocab, bias=False)
 
   def init_state(self, bs:int) -> State:
     return State([BlockState(
-      tm=Tensor.zeros(bs, 1, self.dim),
-      kv=Tensor.zeros(bs, self.n_heads, self.dim // self.n_heads, self.dim // self.n_heads),
-      cm=Tensor.zeros(bs, 1, self.dim),
-    ) for _ in range(self.n_blocks)])
+      tm=Tensor.zeros(bs, 1, self.config.dim),
+      kv=Tensor.zeros(bs, self.config.n_heads, self.head_dim, self.head_dim),
+      cm=Tensor.zeros(bs, 1, self.config.dim),
+    ) for _ in range(self.config.n_blocks)])
 
   def __call__(self, x:Tensor, state:State) -> tuple[Tensor, State]:
     assert x.shape[0] == 1, "only batch size 1 supported"
@@ -57,7 +68,7 @@ class Model:
     new_state = []
     for i, block in enumerate(self.blocks):
       x, block_state = block(x, state.blocks[i])
-      if self.rescale != 0 and (i + 1) % self.rescale == 0: x = x / 2
+      if self.config.rescale != 0 and (i + 1) % self.config.rescale == 0: x = x / 2
       new_state.append(block_state)
 
     logits = self.head(self.ln_out(x))[:, -1, :]
@@ -66,19 +77,19 @@ class Model:
     return logits, State(new_state)
 
   def forward(self, x:Tensor) -> Tensor:
-    x = self.emb_norm(self.emb(x)).dropout(self.dropout)
+    x = self.emb_norm(self.emb(x)).dropout(self.config.dropout)
     for block in self.blocks: x = block.forward(x)
     return self.head(self.ln_out(x))
 
 class Block:
-  def __init__(self, i, n_blocks, dim, n_heads, *, dropout=0.01, linear:Callable=nn.Linear):
-    self.dropout = dropout
+  def __init__(self, i:int, config:Config):
+    self.config = config
 
-    self.ln1 = nn.LayerNorm(dim)
-    self.ln2 = nn.LayerNorm(dim)
+    self.ln1 = nn.LayerNorm(config.dim)
+    self.ln2 = nn.LayerNorm(config.dim)
 
-    self.att = TimeMix(i, n_blocks, dim, n_heads, linear=linear)
-    self.ffn = ChannelMix(i, n_blocks, dim, linear=linear)
+    self.att = TimeMix(i, config)
+    self.ffn = ChannelMix(i, config)
 
   def __call__(self, x:Tensor, state:BlockState) -> tuple[Tensor, BlockState]:
     tm, tm_state, kv_state = self.att(self.ln1(x), state.tm, state.kv)
@@ -87,29 +98,31 @@ class Block:
     return x + cm, BlockState(tm_state, kv_state, cm_state)
 
   def forward(self, x):
-    x = (x + self.att.forward(self.ln1(x))).dropout(self.dropout)
-    return (x + self.ffn.forward(self.ln2(x))).dropout(self.dropout)
+    x = (x + self.att.forward(self.ln1(x))).dropout(self.config.dropout)
+    return (x + self.ffn.forward(self.ln2(x))).dropout(self.config.dropout)
 
 class TimeMix:
-  def __init__(self, i, n_blocks, dim, n_heads, *, linear:Callable=nn.Linear):
-    self.dim, self.n_heads, self.head_dim, self.head_divisor = dim, n_heads, dim // n_heads, 8
+  def __init__(self, i:int, config:Config):
+    self.config = config
+    self.head_dim = config.dim // config.n_heads
+    self.head_divisor = 8
 
-    ratio_0_to_1 = i / (n_blocks - 1)
-    ratio_1_to_almost_0 = 1 - (i / n_blocks)
-    self.time_mix_k = Tensor.arange(dim).div(dim).reshape(1, 1, dim).pow(ratio_1_to_almost_0)
-    self.time_mix_v = Tensor.arange(dim).div(dim).reshape(1, 1, dim).pow(ratio_1_to_almost_0) + 0.3 * ratio_0_to_1
-    self.time_mix_r = Tensor.arange(dim).div(dim).reshape(1, 1, dim).pow(0.5 * ratio_1_to_almost_0)
-    self.time_mix_g = Tensor.arange(dim).div(dim).reshape(1, 1, dim).pow(0.5 * ratio_1_to_almost_0)
+    ratio_0_to_1 = i / (config.n_blocks - 1)
+    ratio_1_to_almost_0 = 1 - (i / config.n_blocks)
+    self.time_mix_k = Tensor.arange(config.dim).div(config.dim).reshape(1, 1, -1).pow(ratio_1_to_almost_0)
+    self.time_mix_v = Tensor.arange(config.dim).div(config.dim).reshape(1, 1, -1).pow(ratio_1_to_almost_0) + 0.3 * ratio_0_to_1
+    self.time_mix_r = Tensor.arange(config.dim).div(config.dim).reshape(1, 1, -1).pow(0.5 * ratio_1_to_almost_0)
+    self.time_mix_g = Tensor.arange(config.dim).div(config.dim).reshape(1, 1, -1).pow(0.5 * ratio_1_to_almost_0)
 
-    self.time_decay = (-6 + 5 * Tensor.arange(dim).div(dim - 1).pow(0.7 + 1.3 * ratio_0_to_1)).reshape(n_heads, self.head_dim).float()
-    self.time_faaaa = Tensor([ratio_0_to_1 * (1 - (n / (dim - 1))) + (((n + 1) % 3 - 1) * 0.1) for n in range(dim)]).reshape(n_heads, self.head_dim)
+    self.time_decay = (-6 + 5 * Tensor.arange(config.dim).div(config.dim - 1).pow(0.7 + 1.3 * ratio_0_to_1)).reshape(config.n_heads, self.head_dim).float()
+    self.time_faaaa = (ratio_0_to_1 * (1 - Tensor.arange(config.dim).div(config.dim - 1)) + Tensor.arange(config.dim).mod(3).sub(1).mul(0.1)).reshape(config.n_heads, self.head_dim)
 
-    self.receptance = linear(dim, dim, bias=False)
-    self.key = linear(dim, dim, bias=False)
-    self.value = linear(dim, dim, bias=False)
-    self.output = linear(dim, dim, bias=False)
-    self.gate = linear(dim, dim, bias=False)
-    self.ln_x = nn.GroupNorm(n_heads, dim, eps=1e-5 * (self.head_divisor ** 2))
+    self.receptance = config.linear(config.dim, config.dim, bias=False)
+    self.key = config.linear(config.dim, config.dim, bias=False)
+    self.value = config.linear(config.dim, config.dim, bias=False)
+    self.output = config.linear(config.dim, config.dim, bias=False)
+    self.gate = config.linear(config.dim, config.dim, bias=False)
+    self.ln_x = nn.GroupNorm(config.n_heads, config.dim, eps=1e-5 * (self.head_divisor ** 2))
 
   @staticmethod
   def wkv(r:Tensor, k:Tensor, v:Tensor, u:Tensor, w:Tensor, kv_state:Tensor, C:int=32):
@@ -172,7 +185,7 @@ class TimeMix:
 
     # projection
     r, k, v = self.receptance(xr), self.key(xk), self.value(xv)
-    (B, T, D), H, X = x.shape, self.n_heads, self.head_dim
+    (B, T, D), H, X = x.shape, self.config.n_heads, self.head_dim
     r, k, v = r.reshape(B, T, H, X), k.reshape(B, T, H, X), v.reshape(B, T, H, X)
     r, k, v = r.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
 
@@ -191,18 +204,18 @@ class TimeMix:
 
   def forward(self, x:Tensor) -> Tensor:
     tm_state = x.pad((None, (1, 0), None)).shrink((None, (0, x.shape[1]), None))
-    kv_state = Tensor.zeros(x.shape[0], self.n_heads, self.head_dim, self.head_dim, dtype=x.dtype, device=x.device)
+    kv_state = Tensor.zeros(x.shape[0], self.config.n_heads, self.head_dim, self.head_dim, dtype=x.dtype, device=x.device)
     return self(x, tm_state, kv_state)[0]
 
 class ChannelMix:
-  def __init__(self, i, n_blocks, dim, *, linear:Callable=nn.Linear):
-    ratio_1_to_almost_0 = 1 - (i / n_blocks)
-    self.time_mix_k = Tensor.arange(dim).div(dim).reshape(1, 1, dim).pow(ratio_1_to_almost_0)
-    self.time_mix_r = Tensor.arange(dim).div(dim).reshape(1, 1, dim).pow(ratio_1_to_almost_0)
+  def __init__(self, i:int, config:Config):
+    ratio_1_to_almost_0 = 1 - (i / config.n_blocks)
+    self.time_mix_k = Tensor.arange(config.dim).div(config.dim).reshape(1, 1, -1).pow(ratio_1_to_almost_0)
+    self.time_mix_r = Tensor.arange(config.dim).div(config.dim).reshape(1, 1, -1).pow(ratio_1_to_almost_0)
 
-    self.receptance = linear(dim, dim, bias=False)
-    self.key = linear(dim, round_up(int(dim * 3.5), 32), bias=False)
-    self.value = linear(round_up(int(dim * 3.5), 32), dim, bias=False)
+    self.receptance = config.linear(config.dim, config.dim, bias=False)
+    self.key = config.linear(config.dim, round_up(int(config.dim * 3.5), 32), bias=False)
+    self.value = config.linear(round_up(int(config.dim * 3.5), 32), config.dim, bias=False)
 
   def __call__(self, x:Tensor, cm_state:Tensor):
     # token shift
