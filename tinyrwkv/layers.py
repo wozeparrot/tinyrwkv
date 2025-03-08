@@ -1,4 +1,6 @@
-from tinygrad import dtypes, Tensor, nn
+from tinygrad.tensor import Tensor
+from tinygrad.dtype import dtypes
+from tinygrad import nn
 
 class Int8Linear:
   def __init__(self, in_features: int, out_features: int, bias=False):
@@ -34,7 +36,7 @@ def NF4Linear(block_size):
 
     def __call__(self, x: Tensor) -> Tensor:
       low_bits = (self.weight * 2 ** 4).contiguous()
-      unpacked = Tensor.stack([self.weight, low_bits], dim=-1).div(2 ** 4, upcast=False)
+      unpacked = Tensor.stack(self.weight, low_bits, dim=-1).div(2 ** 4, upcast=False)
       unscaled = CODE[unpacked].reshape(-1, block_size) * self.scale
       return x.linear(unscaled.reshape(self.out_features, self.in_features).T)
 
