@@ -8,8 +8,6 @@ from tinygrad.helpers import round_up
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.jit import TinyJit
 
-from ..utils import sample
-
 @dataclass
 class BlockState:
   tm: Tensor
@@ -48,11 +46,11 @@ class Model:
   def init_state(self, bs:int) -> State:
     return State([BlockState(
       tm=Tensor.zeros(bs, 1, self.dim),
-      kv=Tensor.zeros(bs, self.n_heads, self.dim // self.n_heads, self.dim // self.n_heads, dtype=dtypes.float32),
+      kv=Tensor.zeros(bs, self.n_heads, self.dim // self.n_heads, self.dim // self.n_heads),
       cm=Tensor.zeros(bs, 1, self.dim),
     ) for _ in range(self.n_blocks)])
 
-  def __call__(self, x:Tensor, state:State, *, temperature:float=0, top_k:int=0, top_p:float=0, alpha_presence:float=0, alpha_frequency:float=0) -> tuple[Tensor, State]:
+  def __call__(self, x:Tensor, state:State) -> tuple[Tensor, State]:
     assert x.shape[0] == 1, "only batch size 1 supported"
 
     x = self.emb_norm(self.emb(x))
@@ -66,8 +64,7 @@ class Model:
     logits = self.head(self.ln_out(x))[:, -1, :]
 
     # sampling
-    token = sample(logits.flatten(), temperature, top_k, top_p, alpha_presence, alpha_frequency)
-    return token, State(new_state)
+    return logits, State(new_state)
 
   def forward(self, x:Tensor) -> Tensor:
     x = self.emb_norm(self.emb(x)).dropout(self.dropout)
