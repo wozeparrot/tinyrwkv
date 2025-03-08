@@ -33,7 +33,6 @@ class State:
 class Model:
   def __init__(self, n_blocks, dim, n_vocab, n_heads, *, rescale=0, dropout=0.01, linear:Callable=nn.Linear):
     self.n_blocks, self.dim, self.n_heads, self.head_dim, self.rescale, self.dropout = n_blocks, dim, n_heads, dim // n_heads, rescale, dropout
-    self.state_size = dim + n_heads * self.head_dim * self.head_dim + dim
 
     self.emb = nn.Embedding(n_vocab, dim)
     self.emb_norm = nn.LayerNorm(dim)
