@@ -1,16 +1,15 @@
 from pathlib import Path
 
-with open(Path(__file__).parent / "vocab" / "world.txt", "r") as f:
-  VOCAB = f.readlines()
-
 class Tokenizer:
   table: list[list[list[bytes]]]
   good: list[set[int]]
   wlen: list[int]
 
-  def __init__(self):
+  def __init__(self, vocab:Path):
+    with open(vocab, "r") as f: self.vocab = f.readlines()
+
     self.idx2token, sorted = {}, []
-    for l in VOCAB:
+    for l in self.vocab:
       idx = int(l[: l.index(" ")])
       x = eval(l[l.index(" ") : l.rindex(" ")])
       x = x.encode("utf-8") if isinstance(x, str) else x
