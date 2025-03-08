@@ -45,6 +45,6 @@ def sample(logits: Tensor, temp: float, k: int, p: float, ap: float, af: float):
 
   # increase alpha counter
   if af or ap:
-    sample.alpha_counter = (counter == output_token).where(sample.alpha_counter + 1, sample.alpha_counter)
+    sample.alpha_counter.assign((counter == output_token).where(sample.alpha_counter + 1, sample.alpha_counter))
 
   return output_token
