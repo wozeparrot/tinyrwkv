@@ -34,7 +34,12 @@
           in
             with pkgs; [
               (python.withPackages python-packages)
+              llvmPackages_latest.clang-unwrapped
             ];
+
+          shellHook = ''
+            export CC=${pkgs.llvmPackages_latest.clang-unwrapped}/bin/clang
+          '';
         };
       }
     );
